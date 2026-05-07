@@ -106,13 +106,29 @@ def _extract_event_urls(soup: BeautifulSoup) -> list[str]:
 
 
 def _page_says_zadarmo(soup: BeautifulSoup) -> bool:
-    """Return True if the GoOut event page explicitly shows 'Zadarmo' / free entry."""
-    text = soup.get_text(" ", strip=True).lower()
+    """Return True if the GoOut event page explicitly shows free entry.
+
+    Primary: look for the ticket-button element (the price pill) containing 'Zadarmo'.
+    This is the most reliable signal — GoOut renders a <button class="ticket-button">
+    with the price text; free events show 'Zadarmo' there.
+    Fallback: normalize full page text and check for free phrases.
+    """
+    # Primary: ticket-button price pill
+    for btn in soup.find_all("button"):
+        classes = btn.get("class") or []
+        if "ticket-button" in classes:
+            if "zadarmo" in btn.get_text(strip=True).lower():
+                return True
+
+    # Fallback: full-page text (handles layout variations)
+    raw = soup.get_text(" ", strip=True)
+    text = " ".join(raw.split()).lower()
     FREE_PHRASES = [
-        "vstupné: zadarmo", "vstupne: zadarmo",
-        "vstupné zadarmo", "vstup zadarmo", "vstup zdarma",
-        "vstupné zdarma", "vstupné voľné", "vstup voľný",
+        "vstupné zadarmo", "vstupne zadarmo",
+        "vstup zadarmo", "vstup zdarma",
+        "vstupné zdarma", "vstupné voľné",
         "free entry", "free admission",
+        "vstupné: zadarmo",
     ]
     return any(phrase in text for phrase in FREE_PHRASES)
 
