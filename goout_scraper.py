@@ -105,12 +105,25 @@ def _extract_event_urls(soup: BeautifulSoup) -> list[str]:
     return urls
 
 
+def _page_says_zadarmo(soup: BeautifulSoup) -> bool:
+    """Return True if the GoOut event page explicitly shows 'Zadarmo' / free entry."""
+    text = soup.get_text(" ", strip=True).lower()
+    FREE_PHRASES = [
+        "vstupné: zadarmo", "vstupne: zadarmo",
+        "vstupné zadarmo", "vstup zadarmo", "vstup zdarma",
+        "vstupné zdarma", "vstupné voľné", "vstup voľný",
+        "free entry", "free admission",
+    ]
+    return any(phrase in text for phrase in FREE_PHRASES)
+
+
 def _scrape_event_detail(url: str) -> dict | None:
     r = _fetch(url)
     if r is None:
         return None
 
     soup = BeautifulSoup(r.text, "html.parser")
+    page_free = _page_says_zadarmo(soup)
 
     # Try JSON-LD (Schema.org Event) first — cleanest source
     for script in soup.find_all("script", type="application/ld+json"):
@@ -122,12 +135,17 @@ def _scrape_event_detail(url: str) -> dict | None:
             if isinstance(data, list):
                 data = next((d for d in data if d.get("@type") == "Event"), None)
             if data and data.get("@type") == "Event":
-                return _parse_jsonld_event(data, url)
+                event = _parse_jsonld_event(data, url)
+                event["page_free"] = page_free
+                return event
         except Exception as e:
             logger.debug(f"JSON-LD parse error for {url}: {e}")
 
     # Fallback: basic HTML extraction
-    return _parse_html_fallback(soup, url)
+    event = _parse_html_fallback(soup, url)
+    if event:
+        event["page_free"] = page_free
+    return event
 
 
 def _parse_jsonld_event(data: dict, url: str) -> dict:
@@ -266,8 +284,8 @@ def _parse_max_price(price_str) -> float:
 
 
 def _is_free(event: dict) -> bool:
-    """Event is free only if ALL ticket options are 0 — not just a free tier in a range like '0–36'."""
-    return event.get("min_price", 999) == 0.0 and event.get("max_price", 999) == 0.0
+    """Event is free if the page explicitly says 'Zadarmo' / 'Vstupné: Zadarmo'."""
+    return event.get("page_free", False)
 
 
 def _calc_duration(start: str, end: str) -> str:
