@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 LISTING_URLS = [
     "https://goout.net/sk/slovensko/akcie/leztaofti/",
+    "https://goout.net/sk/bratislava/akcie/leztaofti/",
+    "https://goout.net/sk/kosice/akcie/leztaofti/",
 ]
 BASE_URL = "https://goout.net"
 HEADERS = {
@@ -129,15 +131,14 @@ def _scrape_event_detail(url: str) -> dict | None:
 
 
 def _parse_jsonld_event(data: dict, url: str) -> dict:
-    # Price
+    # Price — handles "0", "0–36", "100–300", None
     offers = data.get("offers", {})
     if isinstance(offers, list):
-        offers = min(offers, key=lambda o: float(o.get("lowPrice", o.get("price", 999)) or 0))
-    low_price = offers.get("lowPrice", offers.get("price", ""))
-    try:
-        min_price_val = float(low_price) if low_price not in (None, "") else 999.0
-    except (TypeError, ValueError):
-        min_price_val = 999.0
+        prices = [_parse_min_price(o.get("lowPrice", o.get("price", ""))) for o in offers]
+        min_price_val = min(prices) if prices else 999.0
+    else:
+        raw_price = offers.get("lowPrice", offers.get("price", ""))
+        min_price_val = _parse_min_price(raw_price)
 
     # Location
     location = data.get("location", {})
@@ -154,9 +155,11 @@ def _parse_jsonld_event(data: dict, url: str) -> dict:
         address_str = ", ".join(p for p in parts if p)
         city = address_obj.get("addressLocality", "")
 
-    # Dates
-    start = data.get("startDate", "")
-    end = data.get("endDate", "")
+    # Dates — GoOut uses JS format "Fri Jul 10 2026 12:00:00 GMT+0000 (...)"
+    start_raw = data.get("startDate", "")
+    end_raw = data.get("endDate", "")
+    start_date, start_time = _parse_goout_date(start_raw)
+    _, end_time_unused = _parse_goout_date(end_raw)
 
     # Image
     image = data.get("image", "")
@@ -170,9 +173,9 @@ def _parse_jsonld_event(data: dict, url: str) -> dict:
         "source": "goout",
         "title": data.get("name", "").strip(),
         "original_description": (data.get("description") or "").strip()[:1000],
-        "date": start[:10] if start else "",
-        "time_start": start[11:16] if len(start) >= 16 else "",
-        "duration": _calc_duration(start, end),
+        "date": start_date,
+        "time_start": start_time,
+        "duration": _calc_duration(start_raw, end_raw),
         "venue": venue_name,
         "address": address_str,
         "city": city,
@@ -209,6 +212,43 @@ def _parse_html_fallback(soup: BeautifulSoup, url: str) -> dict | None:
     }
 
 
+def _parse_goout_date(date_str: str) -> tuple[str, str]:
+    """Parse GoOut date — handles both ISO and JS format.
+    'Fri Jul 10 2026 12:00:00 GMT+0000 (...)' → ('2026-07-10', '12:00')
+    '2026-07-10T12:00:00+00:00'               → ('2026-07-10', '12:00')
+    """
+    if not date_str:
+        return "", ""
+    # ISO format
+    if "T" in date_str:
+        try:
+            dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+            return dt.strftime("%Y-%m-%d"), dt.strftime("%H:%M")
+        except Exception:
+            pass
+    # JS date format: "Fri Jul 10 2026 12:00:00 GMT+0000 (Coordinated Universal Time)"
+    try:
+        clean = re.sub(r"\(.*?\)", "", date_str)  # remove (...) timezone name
+        clean = re.sub(r"GMT[+-]\d{4}", "", clean).strip()
+        dt = datetime.strptime(clean, "%a %b %d %Y %H:%M:%S")
+        return dt.strftime("%Y-%m-%d"), dt.strftime("%H:%M")
+    except Exception:
+        pass
+    return "", ""
+
+
+def _parse_min_price(price_str) -> float:
+    """Parse '0', '0–36', '100–300' → minimum float price."""
+    if price_str is None or price_str == "":
+        return 999.0
+    s = str(price_str).replace("\u2013", "-").replace("\u2014", "-").replace("–", "-").replace("—", "-")
+    part = s.split("-")[0].strip()
+    try:
+        return float(part)
+    except (ValueError, TypeError):
+        return 999.0
+
+
 def _is_free(event: dict) -> bool:
     return event.get("min_price", 999) == 0.0
 
@@ -217,8 +257,12 @@ def _calc_duration(start: str, end: str) -> str:
     if not start or not end:
         return ""
     try:
-        s = datetime.fromisoformat(start.replace("Z", "+00:00"))
-        e = datetime.fromisoformat(end.replace("Z", "+00:00"))
+        s_date, s_time = _parse_goout_date(start)
+        e_date, e_time = _parse_goout_date(end)
+        if not s_date or not e_date:
+            return ""
+        s = datetime.strptime(f"{s_date} {s_time or '00:00'}", "%Y-%m-%d %H:%M")
+        e = datetime.strptime(f"{e_date} {e_time or '00:00'}", "%Y-%m-%d %H:%M")
         diff = e - s
         if diff.total_seconds() <= 0:
             return ""
