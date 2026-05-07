@@ -29,8 +29,8 @@ HEADERS = {
 MAX_EVENTS = 20
 CRAWL_DELAY = 1.5
 
-# GoOut schedule URL pattern for Slovak site
-SCHEDULE_RE = re.compile(r"^https?://goout\.net/sk/[^/]+/schedule:\d+/?", re.I)
+# GoOut event URL pattern: /sk/[event-slug]/[sz+alphanum-id]/
+SCHEDULE_RE = re.compile(r"^https?://goout\.net/sk/[^/]+/sz[a-z0-9]+/?$", re.I)
 
 
 def scrape_goout(existing_urls: set) -> list[dict]:
