@@ -1,0 +1,40 @@
+services:
+  # Cron job: scrapes GoOut + Tootoot 4x/day, saves free events to Supabase
+  - type: cron
+    name: woeva-scraper
+    runtime: python
+    buildCommand: pip install -r requirements.txt && playwright install chromium --with-deps
+    # 4x/day: 09:00, 13:00, 17:00, 21:00 CET (= 08:00, 12:00, 16:00, 20:00 UTC)
+    schedule: "0 8,12,16,20 * * *"
+    startCommand: python run_scraper.py
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+
+  # Worker: Discord bot — polls Supabase, sends events for approval, posts to Instagram
+  - type: worker
+    name: woeva-bot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot/main.py
+    envVars:
+      - key: DISCORD_BOT_TOKEN
+        sync: false
+      - key: DISCORD_CHANNEL_ID
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: INSTAGRAM_ACCESS_TOKEN
+        sync: false
+      - key: INSTAGRAM_ACCOUNT_ID
+        sync: false
+      - key: BOT_USER_ID
+        value: "00000000-0000-0000-0000-000000000001"
+      - key: POLL_INTERVAL
+        value: "300"

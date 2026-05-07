@@ -1,0 +1,389 @@
+import asyncio
+import logging
+import re
+from datetime import datetime, timezone, timedelta
+
+import discord
+from discord.ext import commands, tasks
+
+from config import DISCORD_CHANNEL_ID, POLL_INTERVAL, SUPABASE_URL, SUPABASE_KEY, BOT_USER_ID
+from database import init_db, is_processed, add_pending_event, update_event_status
+from instagram import post_to_instagram
+from canva import create_event_image
+
+logger = logging.getLogger(__name__)
+
+TAG_EMOJI = {
+    "coffee": "☕",
+    "party": "🎉",
+    "zapasy": "🏆",
+    "sport": "🏃",
+    "umenie": "🎨",
+    "gaming": "🎮",
+    "conference": "📋",
+    "priroda": "🌿",
+    "historia": "🏛️",
+    "zaujimave": "✨",
+}
+
+TAG_COLOR = {
+    "coffee":     discord.Color.from_rgb(150, 90, 50),
+    "party":      discord.Color.from_rgb(180, 0, 180),
+    "zapasy":     discord.Color.from_rgb(255, 165, 0),
+    "sport":      discord.Color.from_rgb(0, 180, 80),
+    "umenie":     discord.Color.from_rgb(100, 0, 200),
+    "gaming":     discord.Color.from_rgb(0, 100, 255),
+    "conference": discord.Color.from_rgb(0, 120, 180),
+    "priroda":    discord.Color.from_rgb(50, 160, 50),
+    "historia":   discord.Color.from_rgb(120, 80, 20),
+    "zaujimave":  discord.Color.from_rgb(200, 255, 0),
+}
+
+
+def _build_ig_caption(event: dict) -> str:
+    """Build Instagram caption for event post."""
+    title = event.get("title", "")
+    description = event.get("description", "")
+    date = event.get("date", "")
+    time_s = event.get("time_start", "")
+    venue = event.get("venue", "")
+    address = event.get("address", "")
+    duration = event.get("duration", "")
+    tag = event.get("tag", "zaujimave")
+    emoji = TAG_EMOJI.get(tag, "✨")
+
+    lines = [title]
+    lines.append("")
+    if description:
+        lines.append(description)
+        lines.append("")
+    if date:
+        date_line = f"📅 {date}"
+        if time_s:
+            date_line += f" o {time_s}"
+        lines.append(date_line)
+    if duration:
+        lines.append(f"⏱ {duration}")
+    if venue:
+        lines.append(f"📍 {venue}")
+    if address:
+        lines.append(f"   {address}")
+    lines.append("")
+    lines.append(f"💚 Vstup zadarmo / Free entry")
+    lines.append(f"{emoji} #{tag} #zadarmo #woeva")
+    lines.append("")
+    lines.append("👉 Stiahni Woeva app a pridaj sa!")
+    lines.append("#slovensko #bratislava #events #freeevents #komunita")
+
+    caption = "\n".join(lines)
+    if len(caption) > 2190:
+        caption = caption[:2187] + "..."
+    return caption
+
+
+def _duration_to_hours(duration_str: str) -> float:
+    """Convert '2h 30min' -> 2.5, '90min' -> 1.5, '2h' -> 2.0"""
+    if not duration_str:
+        return 2.0
+    hours = 0
+    minutes = 0
+    h_match = re.search(r"(\d+)h", duration_str)
+    m_match = re.search(r"(\d+)min", duration_str)
+    if h_match:
+        hours = int(h_match.group(1))
+    if m_match:
+        minutes = int(m_match.group(1))
+    total = hours + minutes / 60
+    return total if total > 0 else 2.0
+
+
+async def _publish_event(event: dict, post_ig: bool) -> str:
+    """Copy approved event to Woeva events table. Optionally post to Instagram."""
+    from supabase import create_client
+    db = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+    event_date = event.get("date") or None
+    event_time = event.get("time_start") or "00:00"
+    duration_hours = _duration_to_hours(event.get("duration", ""))
+
+    venue_full = event.get("venue") or ""
+    if event.get("address"):
+        venue_full = f"{venue_full}, {event['address']}".strip(", ")
+
+    # Insert into Woeva events table
+    event_row = {
+        "creator_id": BOT_USER_ID,
+        "title": event.get("title", ""),
+        "tagline": event.get("description", ""),
+        "category": event.get("tag", "zaujimave"),
+        "cover_url": event.get("photo_url") or None,
+        "date": event_date,
+        "time": event_time,
+        "duration": duration_hours,
+        "venue": venue_full or None,
+        "lat": None,
+        "lng": None,
+        "price": 0,
+        "going_count": 0,
+        "is_free": True,
+        "city": event.get("city") or "Slovensko",
+    }
+
+    # Use service role (bypasses RLS) via the provided SUPABASE_KEY
+    db.table("events").insert(event_row).execute()
+
+    # Mark as approved in scraped_events
+    db.table("scraped_events").update({"approved": True}).eq("id", event["supabase_id"]).execute()
+
+    if not post_ig:
+        return "✅ Pridane do appky"
+
+    # Instagram post
+    try:
+        import httpx as _httpx
+        photo_url = event.get("photo_url", "")
+        if not photo_url:
+            raise ValueError("No photo URL — Instagram post skipped")
+
+        async with _httpx.AsyncClient(timeout=60, follow_redirects=True) as hc:
+            img_resp = await hc.get(photo_url, headers={"User-Agent": "Mozilla/5.0"})
+            img_resp.raise_for_status()
+            photo_bytes = img_resp.content
+
+        img_bytes = create_event_image(photo_bytes)
+        caption = _build_ig_caption(event)
+        await post_to_instagram(img_bytes, caption)
+        return "✅ App + Instagram"
+
+    except _httpx.ReadTimeout:
+        return "✅ App OK — Instagram: rate limit, skus znova za 30 min"
+    except Exception as e:
+        import traceback
+        logger.error(f"Instagram failed for {event['supabase_id']}: {e!r}\n{traceback.format_exc()}")
+        return f"✅ App OK — Instagram failed: {e}"
+
+
+# ── Per-event confirmation view ─────────────────────────────────────────────
+
+class EventConfirmView(discord.ui.View):
+    """Shown for each event — 3 buttons: Instagram+App / App only / Reject."""
+
+    def __init__(self, event: dict):
+        super().__init__(timeout=None)
+        self.event = event
+        sid = event["supabase_id"]
+
+        b_ig = discord.ui.Button(
+            label="Instagram + App", emoji="🚀",
+            style=discord.ButtonStyle.success,
+            custom_id=f"wv_ig:{sid}",
+        )
+        b_app = discord.ui.Button(
+            label="Iba App", emoji="📱",
+            style=discord.ButtonStyle.primary,
+            custom_id=f"wv_app:{sid}",
+        )
+        b_skip = discord.ui.Button(
+            label="Zahodit", emoji="❌",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"wv_skip:{sid}",
+        )
+
+        b_ig.callback = self._cb_ig
+        b_app.callback = self._cb_app
+        b_skip.callback = self._cb_skip
+
+        for b in [b_ig, b_app, b_skip]:
+            self.add_item(b)
+
+    async def _finish(self, interaction: discord.Interaction, post_ig: bool):
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        try:
+            result = await _publish_event(self.event, post_ig=post_ig)
+            await update_event_status(self.event["supabase_id"], "approved")
+            if interaction.message and interaction.message.embeds:
+                emb = interaction.message.embeds[0].copy()
+                emb.colour = discord.Color.green()
+                emb.set_footer(text=f"{result} — {interaction.user.display_name}")
+                await interaction.message.edit(embed=emb, view=None)
+            await interaction.followup.send(result, ephemeral=True)
+        except Exception as e:
+            logger.error(f"Publish error: {e}", exc_info=True)
+            await interaction.followup.send(f"Chyba: {e}", ephemeral=True)
+
+    async def _cb_ig(self, interaction: discord.Interaction):
+        await self._finish(interaction, post_ig=True)
+
+    async def _cb_app(self, interaction: discord.Interaction):
+        await self._finish(interaction, post_ig=False)
+
+    async def _cb_skip(self, interaction: discord.Interaction):
+        await update_event_status(self.event["supabase_id"], "rejected")
+        try:
+            from supabase import create_client
+            db = create_client(SUPABASE_URL, SUPABASE_KEY)
+            db.table("scraped_events").update({"rejected": True}).eq("id", self.event["supabase_id"]).execute()
+        except Exception as e:
+            logger.error(f"Failed to mark rejected in Supabase: {e}")
+        if interaction.message and interaction.message.embeds:
+            emb = interaction.message.embeds[0].copy()
+            emb.colour = discord.Color.red()
+            emb.set_footer(text=f"Zahodene — {interaction.user.display_name}")
+            await interaction.message.edit(embed=emb, view=None)
+        await interaction.response.send_message("Event zahodeny.", ephemeral=True)
+
+
+# ── Cog ─────────────────────────────────────────────────────────────────────
+
+class EventReviewCog(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        self._lock = asyncio.Lock()
+        self.poll_events.start()
+
+    def cog_unload(self):
+        self.poll_events.cancel()
+
+    async def cog_load(self):
+        """Re-register persistent views for all pending events on bot startup."""
+        try:
+            from supabase import create_client
+            db = create_client(SUPABASE_URL, SUPABASE_KEY)
+            result = (
+                db.table("scraped_events")
+                .select("id, title, description, tag, date, time_start, duration, venue, address, city, photo_url, source_url, source")
+                .eq("discord_sent", True)
+                .eq("approved", False)
+                .eq("rejected", False)
+                .order("scraped_at", desc=True)
+                .limit(100)
+                .execute()
+            )
+            count = 0
+            for row in result.data or []:
+                event = _row_to_event(row)
+                self.bot.add_view(EventConfirmView(event))
+                count += 1
+            if count:
+                logger.info(f"Restored {count} persistent EventConfirmView(s)")
+        except Exception as e:
+            logger.warning(f"Could not restore views on startup: {e}")
+
+    @tasks.loop(seconds=POLL_INTERVAL)
+    async def poll_events(self):
+        async with self._lock:
+            await self._check_new_events()
+
+    @poll_events.before_loop
+    async def before_poll(self):
+        await self.bot.wait_until_ready()
+        await asyncio.sleep(15)
+
+    async def _check_new_events(self):
+        if not SUPABASE_URL or not SUPABASE_KEY:
+            return
+        try:
+            from supabase import create_client
+            db = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+            # Atomically claim unclaimed events (discord_sent IS NULL or FALSE)
+            claim = (
+                db.table("scraped_events")
+                .update({"discord_sent": True})
+                .or_("discord_sent.is.null,discord_sent.eq.false")
+                .eq("approved", False)
+                .eq("rejected", False)
+                .execute()
+            )
+
+            new_events = list(reversed(claim.data or []))
+            if not new_events:
+                return
+
+            logger.info(f"Claimed {len(new_events)} new events for Discord")
+
+            channel = self.bot.get_channel(DISCORD_CHANNEL_ID)
+            if not channel:
+                logger.error(f"Channel {DISCORD_CHANNEL_ID} not found")
+                return
+
+            for row in new_events:
+                sid = str(row["id"])
+                if await is_processed(sid):
+                    continue
+                event = _row_to_event(row)
+                await self._send_event(channel, event)
+                await asyncio.sleep(0.5)
+
+        except Exception as e:
+            logger.error(f"Poll error: {e}", exc_info=True)
+
+    async def _send_event(self, channel: discord.TextChannel, event: dict):
+        tag = event.get("tag", "zaujimave")
+        emoji = TAG_EMOJI.get(tag, "✨")
+        color = TAG_COLOR.get(tag, discord.Color.from_rgb(200, 255, 0))
+
+        emb = discord.Embed(
+            title=f"{emoji} {(event.get('title') or '')[:253]}",
+            url=event.get("source_url") or None,
+            color=color,
+        )
+
+        # Description block
+        desc_lines = []
+        if event.get("description"):
+            desc_lines.append(event["description"])
+        if event.get("date"):
+            d_line = f"\n**Datum:** {event['date']}"
+            if event.get("time_start"):
+                d_line += f" o {event['time_start']}"
+            desc_lines.append(d_line)
+        if event.get("duration"):
+            desc_lines.append(f"**Trvanie:** {event['duration']}")
+        if event.get("venue"):
+            desc_lines.append(f"**Miesto:** {event['venue']}")
+        if event.get("address"):
+            desc_lines.append(f"**Adresa:** {event['address']}")
+        if event.get("city"):
+            desc_lines.append(f"**Mesto:** {event['city']}")
+        desc_lines.append("\n**Vstup: Zadarmo**")
+
+        emb.description = "\n".join(desc_lines)
+        emb.add_field(name="Tag", value=f"{emoji} {tag}", inline=True)
+        emb.add_field(name="Zdroj", value=(event.get("source") or "").upper(), inline=True)
+
+        if event.get("photo_url"):
+            emb.set_image(url=event["photo_url"])
+        emb.set_footer(text=f"ID: {event['supabase_id']}")
+
+        view = EventConfirmView(event)
+        self.bot.add_view(view)
+        msg = await channel.send(
+            content="**Novy event — co s nim?**",
+            embed=emb,
+            view=view,
+        )
+        await add_pending_event(event["supabase_id"], str(msg.id), str(channel.id))
+        logger.info(f"Sent event {event['supabase_id'][:8]} to Discord msg {msg.id}")
+
+
+def _row_to_event(row: dict) -> dict:
+    return {
+        "supabase_id": str(row["id"]),
+        "title": row.get("title") or "",
+        "description": row.get("description") or "",
+        "tag": row.get("tag") or "zaujimave",
+        "date": row.get("date") or "",
+        "time_start": row.get("time_start") or "",
+        "duration": row.get("duration") or "",
+        "venue": row.get("venue") or "",
+        "address": row.get("address") or "",
+        "city": row.get("city") or "",
+        "photo_url": row.get("photo_url") or "",
+        "source_url": row.get("source_url") or "",
+        "source": row.get("source") or "",
+    }
+
+
+async def setup(bot: commands.Bot):
+    await bot.add_cog(EventReviewCog(bot))
