@@ -3,7 +3,7 @@ services:
   - type: cron
     name: woeva-scraper
     runtime: python
-    buildCommand: pip install -r requirements.txt && playwright install chromium --with-deps
+    buildCommand: pip install -r requirements.txt && python -m playwright install-deps chromium && python -m playwright install chromium
     # 4x/day: 09:00, 13:00, 17:00, 21:00 CET (= 08:00, 12:00, 16:00, 20:00 UTC)
     schedule: "0 8,12,16,20 * * *"
     startCommand: python run_scraper.py
