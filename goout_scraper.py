@@ -132,13 +132,16 @@ def _scrape_event_detail(url: str) -> dict | None:
 
 def _parse_jsonld_event(data: dict, url: str) -> dict:
     # Price — handles "0", "0–36", "100–300", None
+    # Only FREE if max price is also 0 (not just "0–36" which means paid tiers exist)
     offers = data.get("offers", {})
     if isinstance(offers, list):
-        prices = [_parse_min_price(o.get("lowPrice", o.get("price", ""))) for o in offers]
-        min_price_val = min(prices) if prices else 999.0
+        raw_prices = [o.get("lowPrice", o.get("price", "")) for o in offers]
+        min_price_val = min(_parse_min_price(p) for p in raw_prices) if raw_prices else 999.0
+        max_price_val = max(_parse_max_price(p) for p in raw_prices) if raw_prices else 999.0
     else:
         raw_price = offers.get("lowPrice", offers.get("price", ""))
         min_price_val = _parse_min_price(raw_price)
+        max_price_val = _parse_max_price(raw_price)
 
     # Location
     location = data.get("location", {})
@@ -181,6 +184,7 @@ def _parse_jsonld_event(data: dict, url: str) -> dict:
         "city": city,
         "photo_url": image,
         "min_price": min_price_val,
+        "max_price": max_price_val,
     }
 
 
@@ -238,7 +242,7 @@ def _parse_goout_date(date_str: str) -> tuple[str, str]:
 
 
 def _parse_min_price(price_str) -> float:
-    """Parse '0', '0–36', '100–300' → minimum float price."""
+    """Parse price string → minimum float. '0'→0.0, '0–36'→0.0, '100–300'→100.0"""
     if price_str is None or price_str == "":
         return 999.0
     s = str(price_str).replace("\u2013", "-").replace("\u2014", "-").replace("–", "-").replace("—", "-")
@@ -249,8 +253,21 @@ def _parse_min_price(price_str) -> float:
         return 999.0
 
 
+def _parse_max_price(price_str) -> float:
+    """Parse price string → maximum float. '0'→0.0, '0–36'→36.0, '100–300'→300.0"""
+    if price_str is None or price_str == "":
+        return 999.0
+    s = str(price_str).replace("\u2013", "-").replace("\u2014", "-").replace("–", "-").replace("—", "-")
+    parts = s.split("-")
+    try:
+        return float(parts[-1].strip())
+    except (ValueError, TypeError):
+        return 999.0
+
+
 def _is_free(event: dict) -> bool:
-    return event.get("min_price", 999) == 0.0
+    """Event is free only if ALL ticket options are 0 — not just a free tier in a range like '0–36'."""
+    return event.get("min_price", 999) == 0.0 and event.get("max_price", 999) == 0.0
 
 
 def _calc_duration(start: str, end: str) -> str:
