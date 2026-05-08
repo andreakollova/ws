@@ -26,6 +26,7 @@ from supabase import create_client
 
 from goout_scraper import scrape_goout
 from tootoot_scraper import scrape_tootoot
+from eventland_scraper import scrape_eventland
 from enrich import enrich_event
 
 logging.basicConfig(
@@ -74,6 +75,14 @@ def main():
         raw_events.extend(tootoot_events)
     except Exception as e:
         logger.error(f"Tootoot scraper failed: {e}", exc_info=True)
+
+    # Eventland
+    try:
+        eventland_events = scrape_eventland(existing_urls)
+        logger.info(f"Eventland: {len(eventland_events)} new free events")
+        raw_events.extend(eventland_events)
+    except Exception as e:
+        logger.error(f"Eventland scraper failed: {e}", exc_info=True)
 
     saved = 0
     for event in raw_events:
