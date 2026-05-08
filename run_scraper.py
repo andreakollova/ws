@@ -27,6 +27,7 @@ from supabase import create_client
 from goout_scraper import scrape_goout
 from tootoot_scraper import scrape_tootoot
 from eventland_scraper import scrape_eventland
+from petrzalka_scraper import scrape_petrzalka
 from enrich import enrich_event
 
 logging.basicConfig(
@@ -83,6 +84,14 @@ def main():
         raw_events.extend(eventland_events)
     except Exception as e:
         logger.error(f"Eventland scraper failed: {e}", exc_info=True)
+
+    # FC Petržalka ženy — upcoming matches
+    try:
+        petrzalka_events = scrape_petrzalka(existing_urls)
+        logger.info(f"Petržalka: {len(petrzalka_events)} new match events")
+        raw_events.extend(petrzalka_events)
+    except Exception as e:
+        logger.error(f"Petržalka scraper failed: {e}", exc_info=True)
 
     saved = 0
     for event in raw_events:
