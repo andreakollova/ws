@@ -76,10 +76,10 @@ def _parse_fixtures(html: str) -> list[dict]:
         if "AD" not in fields or "CX" not in fields or "AF" not in fields:
             continue
 
-        # Skip if neither team is Petržalka
+        # Skip if Petržalka is not playing at home
         home = fields["CX"]
         away = fields["AF"]
-        if TEAM_NAME not in home and TEAM_NAME not in away:
+        if TEAM_NAME not in home:
             continue
 
         try:
