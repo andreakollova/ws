@@ -16,7 +16,19 @@ logger = logging.getLogger(__name__)
 
 TEAM_URL = "https://www.flashscore.sk/tim/fc-petrzalka/K0sAKyf1/"
 TEAM_NAME = "Petržalka Ž"
-PHOTO_URL = "https://mediamanager.ws/images/27x11x1182x887-1920x1440xmedia/pages/f/futbalsfz.sk/2025/11/petrzalka-zeny-n.jpg.webp"
+GITHUB_RAW = "https://raw.githubusercontent.com/andreakollova/ws/main/photos/petrzalka"
+
+# Opponent keyword → photo filename (lowercase match)
+OPPONENT_PHOTOS = {
+    "bardejov": "bardejov.jpg",
+    "prešov":   "presov.jpg",
+    "presov":   "presov.jpg",
+    "žilina":   "zilina.jpg",
+    "zilina":   "zilina.jpg",
+}
+# Generic photos cycled for opponents without a specific photo
+GENERIC_PHOTOS = ["1.jpg", "4.jpg", "5.jpg", "6.jpg", "7.jpg"]
+
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; WoevaEventsBot/1.0; +https://woeva.com)",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -40,7 +52,8 @@ def scrape_petrzalka(existing_urls: set) -> list[dict]:
     logger.info(f"  Found {len(matches)} upcoming matches")
 
     events = []
-    for match in matches:
+    for index, match in enumerate(matches):
+        match["index"] = index
         url = match["url"]
         if url in existing_urls:
             logger.debug(f"Skip (known): {url}")
@@ -112,16 +125,16 @@ def _parse_fixtures(html: str) -> list[dict]:
 def _match_to_event(match: dict) -> dict:
     home = match["home"]
     away = match["away"]
-    is_home = match["is_home"]
-    opponent = away if is_home else home
+    opponent = away  # always home matches
 
     title = f"{home} – {away}"
 
-    location_note = "Petržalka, Bratislava" if is_home else f"Zápas mimo domova vs {opponent}"
     original_description = (
-        f"Zápas 1. ligy žien, Skupina o titul. {title}. "
-        f"{'Domáci zápas' if is_home else 'Hosťujúci zápas'} FC Petržalka ženy."
+        f"Domáci zápas FC Petržalka ženy v 1. lige žien (Skupina o titul). "
+        f"Súper: {opponent}. Príďte povzbudiť naše futbalistky na štadióne v Petržalke!"
     )
+
+    photo_url = _pick_photo(opponent, match.get("index", 0))
 
     return {
         "source_url": match["url"],
@@ -131,11 +144,22 @@ def _match_to_event(match: dict) -> dict:
         "date": match["date"],
         "time_start": match["time"],
         "duration": "90min",
-        "venue": "Štadión FC Petržalka" if is_home else "",
-        "address": "Petržalka, Bratislava" if is_home else "",
+        "venue": "Štadión FC Petržalka",
+        "address": "Petržalka, Bratislava",
         "city": "Bratislava",
-        "photo_url": PHOTO_URL,
+        "photo_url": photo_url,
         "min_price": 0.0,
         "max_price": 0.0,
         "page_free": True,
     }
+
+
+def _pick_photo(opponent: str, index: int) -> str:
+    """Return photo URL — opponent-specific if available, else cycle through generics."""
+    opp_lower = opponent.lower()
+    for keyword, filename in OPPONENT_PHOTOS.items():
+        if keyword in opp_lower:
+            return f"{GITHUB_RAW}/{filename}"
+    # Cycle through generic photos based on match index
+    filename = GENERIC_PHOTOS[index % len(GENERIC_PHOTOS)]
+    return f"{GITHUB_RAW}/{filename}"
