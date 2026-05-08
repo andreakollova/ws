@@ -163,12 +163,11 @@ def _scrape_event_detail(url: str) -> dict | None:
         description = jsonld["description"].strip()[:1000]
 
     # --- Image ---
-    image = ""
-    if jsonld and jsonld.get("image"):
+    # og:image is event-specific; JSON-LD image is often a generic category placeholder
+    og = soup.find("meta", property="og:image")
+    image = og.get("content", "").strip() if og else ""
+    if not image and jsonld and jsonld.get("image"):
         image = jsonld["image"] if isinstance(jsonld["image"], str) else (jsonld["image"] or [None])[0] or ""
-    if not image:
-        og = soup.find("meta", property="og:image")
-        image = og.get("content", "").strip() if og else ""
 
     # --- Venue / Address / City ---
     venue = ""
