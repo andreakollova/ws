@@ -492,15 +492,8 @@ class EventReviewCog(commands.Cog):
         flag = COUNTRY_FLAG.get(country, "🌍")
         lbl = COUNTRY_LABELS.get(country, COUNTRY_LABELS["SK"])
 
-        raw_title = (event.get('title') or '').strip()
-        venue_prefix = (event.get('venue') or '').strip()
-        if venue_prefix and not raw_title.lower().startswith(venue_prefix.lower()):
-            full_title = f"{venue_prefix} {raw_title}"
-        else:
-            full_title = raw_title
-
         emb = discord.Embed(
-            title=full_title[:256],
+            title=(event.get('title') or '')[:256],
             url=event.get("source_url") or None,
             color=color,
         )
