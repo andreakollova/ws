@@ -2,7 +2,11 @@ import asyncio
 import logging
 import re
 from datetime import datetime, timezone, timedelta
-from zoneinfo import ZoneInfo
+from typing import Optional
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo  # type: ignore
 
 import discord
 from discord.ext import commands, tasks
@@ -376,7 +380,7 @@ class EventReviewCog(commands.Cog):
         self._lock = asyncio.Lock()
         # Initialise to now so the no-events notice doesn't fire immediately on startup
         self._last_event_sent: datetime = datetime.now(timezone.utc)
-        self._last_no_events_notice: datetime | None = None
+        self._last_no_events_notice: Optional[datetime] = None
         self.poll_events.start()
 
     def cog_unload(self):
