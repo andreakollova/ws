@@ -9,7 +9,7 @@ from config import DISCORD_BOT_TOKEN, DISCORD_CHANNEL_ID
 from database import init_db
 
 BOT_NAME = "Woeva Picks"
-AVATAR_PATH = Path(__file__).parent / "woevapicks.jpg"
+AVATAR_PATH = Path(__file__).parent / "woevapicksimg.jpg"
 
 logging.basicConfig(
     level=logging.INFO,
