@@ -2,6 +2,7 @@ import asyncio
 import logging
 import re
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 import discord
 from discord.ext import commands, tasks
@@ -287,10 +288,15 @@ class EventConfirmView(discord.ui.View):
 
 # ── Cog ─────────────────────────────────────────────────────────────────────
 
+NO_EVENTS_INTERVAL_H = 6  # send "no events" notice at most once per this many hours
+
+
 class EventReviewCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._lock = asyncio.Lock()
+        self._last_event_sent: datetime | None = None
+        self._last_no_events_notice: datetime | None = None
         self.poll_events.start()
 
     def cog_unload(self):
@@ -349,15 +355,19 @@ class EventReviewCog(commands.Cog):
             )
 
             new_events = list(reversed(claim.data or []))
-            if not new_events:
-                return
-
-            logger.info(f"Claimed {len(new_events)} new events for Discord")
 
             channel = self.bot.get_channel(DISCORD_CHANNEL_ID)
             if not channel:
                 logger.error(f"Channel {DISCORD_CHANNEL_ID} not found")
                 return
+
+            if not new_events:
+                await self._maybe_send_no_events_notice(channel)
+                return
+
+            logger.info(f"Claimed {len(new_events)} new events for Discord")
+            self._last_event_sent = datetime.now(timezone.utc)
+            self._last_no_events_notice = None  # reset so notice fires again after a dry spell
 
             for row in new_events:
                 sid = str(row["id"])
@@ -369,6 +379,25 @@ class EventReviewCog(commands.Cog):
 
         except Exception as e:
             logger.error(f"Poll error: {e}", exc_info=True)
+
+    async def _maybe_send_no_events_notice(self, channel: discord.TextChannel):
+        """Send a 'no new events found' notice at most once every NO_EVENTS_INTERVAL_H hours."""
+        now = datetime.now(timezone.utc)
+        interval = timedelta(hours=NO_EVENTS_INTERVAL_H)
+
+        # Don't send if we just sent real events recently
+        if self._last_event_sent and (now - self._last_event_sent) < interval:
+            return
+        # Don't repeat the notice within the same interval
+        if self._last_no_events_notice and (now - self._last_no_events_notice) < interval:
+            return
+
+        self._last_no_events_notice = now
+        local_time = now.astimezone(ZoneInfo("Europe/Bratislava")).strftime("%H:%M")
+        await channel.send(
+            f"🔍 **Scraper hlásenie ({local_time})** — nenašiel som žiadne nové eventy."
+        )
+        logger.info("Sent no-events notice to Discord")
 
     async def _send_event(self, channel: discord.TextChannel, event: dict):
         tag = event.get("tag", "zaujimave")
