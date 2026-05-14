@@ -484,7 +484,7 @@ class EventReviewCog(commands.Cog):
         logger.info("Sent no-events notice to Discord")
 
     async def _send_event(self, channel: discord.TextChannel, event: dict):
-        tag = event.get("tag", "zaujimave")
+        tag = (event.get("tag") or "zaujimave").split(",")[0].strip()
         emoji = TAG_EMOJI.get(tag, "✨")
         color = TAG_COLOR.get(tag, discord.Color.from_rgb(200, 255, 0))
 
