@@ -21,8 +21,8 @@ BASE_URL = "https://www.eventbrite.com"
 LISTING_URLS = [
     "https://www.eventbrite.com/d/united-kingdom--london/free--events/",
 ]
-MAX_PAGES = 5
-CRAWL_DELAY = 2.0
+MAX_PAGES = 2
+CRAWL_DELAY = 0.8
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "

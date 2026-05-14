@@ -29,8 +29,9 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "sk-SK,sk;q=0.9,en;q=0.5",
 }
-MAX_EVENTS = 20
-CRAWL_DELAY = 1.5
+MAX_EVENTS = 15
+MAX_CHECKS = 25   # stop after checking this many unknown URLs
+CRAWL_DELAY = 0.8
 
 # Eventland event URL: /{locale?}/{city}/event/{id}/{slug}/
 EVENT_URL_RE = re.compile(
@@ -82,6 +83,7 @@ def scrape_eventland(existing_urls: set) -> list[dict]:
         all_event_urls.extend(found)
 
     seen_urls: set[str] = set()
+    checks = 0
     for url in all_event_urls:
         if url in seen_urls:
             continue
@@ -90,6 +92,11 @@ def scrape_eventland(existing_urls: set) -> list[dict]:
         if url in existing_urls:
             logger.debug(f"Skip (known): {url}")
             continue
+
+        if checks >= MAX_CHECKS:
+            logger.info(f"Eventland: reached MAX_CHECKS ({MAX_CHECKS}), stopping early")
+            break
+        checks += 1
 
         time.sleep(CRAWL_DELAY)
         event = _scrape_event_detail(url)

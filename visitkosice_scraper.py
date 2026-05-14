@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://visitkosice.org"
 LISTING_URL = "https://visitkosice.org/podujatia/kategorie/aktualne-podujatia"
-MAX_PAGES = 34  # 330 results / 10 per page
-CRAWL_DELAY = 1.5
+MAX_PAGES = 5   # max 50 events per run, enough for new ones
+CRAWL_DELAY = 0.8
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; WoevaEventsBot/1.0; +https://woeva.com)",

@@ -29,7 +29,8 @@ HEADERS = {
     "Accept-Language": "sk-SK,sk;q=0.9,en;q=0.5",
 }
 MAX_EVENTS = 20
-CRAWL_DELAY = 1.5
+MAX_CHECKS = 30   # stop after checking this many unknown URLs (prevents timeout)
+CRAWL_DELAY = 0.8
 
 # GoOut event URL pattern: /sk/[event-slug]/[sz+alphanum-id]/
 SCHEDULE_RE = re.compile(r"^https?://goout\.net/sk/[^/]+/sz[a-z0-9]+/?$", re.I)
@@ -52,6 +53,7 @@ def scrape_goout(existing_urls: set) -> list[dict]:
         all_event_urls.extend(found)
 
     seen_urls: set[str] = set()
+    checks = 0
     for url in all_event_urls:
         if url in seen_urls:
             continue
@@ -60,6 +62,11 @@ def scrape_goout(existing_urls: set) -> list[dict]:
         if url in existing_urls:
             logger.debug(f"Skip (known): {url}")
             continue
+
+        if checks >= MAX_CHECKS:
+            logger.info(f"GoOut: reached MAX_CHECKS ({MAX_CHECKS}), stopping early")
+            break
+        checks += 1
 
         time.sleep(CRAWL_DELAY)
         event = _scrape_event_detail(url)
