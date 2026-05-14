@@ -216,16 +216,91 @@ async def _publish_event(event: dict, post_ig: bool) -> str:
         return f"✅ App OK — Instagram failed: {e}"
 
 
+# ── Edit modal ───────────────────────────────────────────────────────────────
+
+class EditEventModal(discord.ui.Modal, title="Upraviť event"):
+    def __init__(self, view: "EventConfirmView"):
+        super().__init__()
+        self.event_view = view
+        event = view.event
+
+        self.f_title = discord.ui.TextInput(
+            label="Názov", default=event.get("title", ""), max_length=200, required=True
+        )
+        self.f_date = discord.ui.TextInput(
+            label="Dátum (YYYY-MM-DD)", default=event.get("date", ""),
+            placeholder="2026-06-01", required=False, max_length=10
+        )
+        self.f_time = discord.ui.TextInput(
+            label="Čas (HH:MM)", default=event.get("time_start", ""),
+            placeholder="18:00", required=False, max_length=5
+        )
+        self.f_venue = discord.ui.TextInput(
+            label="Miesto", default=event.get("venue", ""),
+            placeholder="Názov miesta", required=False, max_length=200
+        )
+        self.f_city = discord.ui.TextInput(
+            label="Mesto", default=event.get("city", "Bratislava"),
+            required=False, max_length=100
+        )
+        for field in [self.f_title, self.f_date, self.f_time, self.f_venue, self.f_city]:
+            self.add_item(field)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        e = self.event_view.event
+        e["title"] = self.f_title.value.strip()
+        e["date"] = self.f_date.value.strip()
+        e["time_start"] = self.f_time.value.strip()
+        e["venue"] = self.f_venue.value.strip()
+        e["city"] = self.f_city.value.strip()
+
+        # Update embed to reflect changes
+        if interaction.message and interaction.message.embeds:
+            old = interaction.message.embeds[0]
+            country = _resolve_country(e)
+            flag = COUNTRY_FLAG.get(country, "🌍")
+            lbl = COUNTRY_LABELS.get(country, COUNTRY_LABELS["SK"])
+            tag = e.get("tag", "zaujimave")
+            emoji = TAG_EMOJI.get(tag, "✨")
+
+            desc_lines = []
+            if e.get("description"):
+                desc_lines.append(e["description"])
+            if e.get("date"):
+                d_line = f"\n**{lbl['date']}:** {e['date']}"
+                if e.get("time_start"):
+                    d_line += f" o {e['time_start']}"
+                desc_lines.append(d_line)
+            if e.get("venue"):
+                desc_lines.append(f"**{lbl['venue']}:** {e['venue']}")
+            if e.get("city"):
+                desc_lines.append(f"**{lbl['city']}:** {flag} {e['city']}")
+            desc_lines.append(f"\n**{lbl['free']}**")
+
+            emb = old.copy()
+            emb.title = f"{flag} {emoji} {e['title'][:250]}"
+            emb.description = "\n".join(desc_lines)
+            emb.set_footer(text=f"✏️ Upravené — {interaction.user.display_name}")
+            await interaction.message.edit(embed=emb)
+
+        await interaction.response.send_message("✏️ Event upravený.", ephemeral=True)
+
+
 # ── Per-event confirmation view ─────────────────────────────────────────────
 
 class EventConfirmView(discord.ui.View):
-    """Shown for each event — 3 buttons: Instagram+App / App only / Reject."""
+    """Shown for each event — 4 buttons: Edit / Instagram+App / App only / Reject."""
 
     def __init__(self, event: dict):
         super().__init__(timeout=None)
         self.event = event
         sid = event["supabase_id"]
 
+        b_edit = discord.ui.Button(
+            label="Upraviť", emoji="✏️",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"wv_edit:{sid}",
+        )
         b_ig = discord.ui.Button(
             label="Instagram + App", emoji="🚀",
             style=discord.ButtonStyle.success,
@@ -242,11 +317,12 @@ class EventConfirmView(discord.ui.View):
             custom_id=f"wv_skip:{sid}",
         )
 
+        b_edit.callback = self._cb_edit
         b_ig.callback = self._cb_ig
         b_app.callback = self._cb_app
         b_skip.callback = self._cb_skip
 
-        for b in [b_ig, b_app, b_skip]:
+        for b in [b_edit, b_ig, b_app, b_skip]:
             self.add_item(b)
 
     async def _finish(self, interaction: discord.Interaction, post_ig: bool):
@@ -263,6 +339,9 @@ class EventConfirmView(discord.ui.View):
         except Exception as e:
             logger.error(f"Publish error: {e}", exc_info=True)
             await interaction.followup.send(f"Chyba: {e}", ephemeral=True)
+
+    async def _cb_edit(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(EditEventModal(self))
 
     async def _cb_ig(self, interaction: discord.Interaction):
         await self._finish(interaction, post_ig=True)
