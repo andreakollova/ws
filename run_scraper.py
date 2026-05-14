@@ -29,6 +29,8 @@ from tootoot_scraper import scrape_tootoot
 from eventland_scraper import scrape_eventland
 from petrzalka_scraper import scrape_petrzalka
 from visitkosice_scraper import scrape_visitkosice
+from eventbrite_scraper import scrape_eventbrite
+from kudyznudy_scraper import scrape_kudyznudy
 from enrich import enrich_event
 
 logging.basicConfig(
@@ -101,6 +103,22 @@ def main():
         raw_events.extend(kosice_events)
     except Exception as e:
         logger.error(f"VisitKošice scraper failed: {e}", exc_info=True)
+
+    # Eventbrite London — free events
+    try:
+        eventbrite_events = scrape_eventbrite(existing_urls)
+        logger.info(f"Eventbrite London: {len(eventbrite_events)} new free events")
+        raw_events.extend(eventbrite_events)
+    except Exception as e:
+        logger.error(f"Eventbrite scraper failed: {e}", exc_info=True)
+
+    # KudyZNudy Prague — free events
+    try:
+        kudyznudy_events = scrape_kudyznudy(existing_urls)
+        logger.info(f"KudyZNudy Prague: {len(kudyznudy_events)} new free events")
+        raw_events.extend(kudyznudy_events)
+    except Exception as e:
+        logger.error(f"KudyZNudy scraper failed: {e}", exc_info=True)
 
     saved = 0
     for event in raw_events:

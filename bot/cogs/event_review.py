@@ -13,6 +13,57 @@ from canva import create_event_image
 
 logger = logging.getLogger(__name__)
 
+COUNTRY_FLAG: dict[str, str] = {
+    "SK": "🇸🇰",
+    "AT": "🇦🇹",
+    "CZ": "🇨🇿",
+    "GB": "🇬🇧",
+    "DE": "🇩🇪",
+    "HU": "🇭🇺",
+    "PL": "🇵🇱",
+}
+
+# Native language labels for embed fields per country
+COUNTRY_LABELS: dict[str, dict[str, str]] = {
+    "SK": {
+        "date": "Dátum", "duration": "Trvanie", "venue": "Miesto",
+        "address": "Adresa", "city": "Mesto", "free": "Vstup: Zadarmo",
+    },
+    "AT": {
+        "date": "Datum", "duration": "Dauer", "venue": "Ort",
+        "address": "Adresse", "city": "Stadt", "free": "Eintritt frei",
+    },
+    "CZ": {
+        "date": "Datum", "duration": "Trvání", "venue": "Místo",
+        "address": "Adresa", "city": "Město", "free": "Vstup zdarma",
+    },
+    "GB": {
+        "date": "Date", "duration": "Duration", "venue": "Venue",
+        "address": "Address", "city": "City", "free": "Free Entry",
+    },
+    "DE": {
+        "date": "Datum", "duration": "Dauer", "venue": "Ort",
+        "address": "Adresse", "city": "Stadt", "free": "Eintritt frei",
+    },
+}
+
+# City name → country code fallback (for rows without country column)
+CITY_COUNTRY: dict[str, str] = {
+    "Bratislava": "SK", "Košice": "SK", "Kosice": "SK",
+    "Vienna": "AT", "Wien": "AT",
+    "Prague": "CZ", "Praha": "CZ",
+    "London": "GB",
+    "Berlin": "DE", "München": "DE", "Munich": "DE",
+}
+
+
+def _resolve_country(event: dict) -> str:
+    country = event.get("country") or ""
+    if country and country in COUNTRY_FLAG:
+        return country
+    return CITY_COUNTRY.get(event.get("city", ""), "SK")
+
+
 TAG_EMOJI = {
     "coffee": "☕",
     "party": "🎉",
@@ -127,6 +178,7 @@ async def _publish_event(event: dict, post_ig: bool) -> str:
         "going_count": 0,
         "is_free": True,
         "city": event.get("city") or "Slovensko",
+        "country": _resolve_country(event),
     }
 
     # Use service role (bypasses RLS) via the provided SUPABASE_KEY
@@ -251,7 +303,7 @@ class EventReviewCog(commands.Cog):
             db = create_client(SUPABASE_URL, SUPABASE_KEY)
             result = (
                 db.table("scraped_events")
-                .select("id, title, description, tag, date, time_start, duration, venue, address, city, photo_url, source_url, source")
+                .select("id, title, description, tag, date, time_start, duration, venue, address, city, country, photo_url, source_url, source")
                 .eq("discord_sent", True)
                 .eq("approved", False)
                 .eq("rejected", False)
@@ -323,34 +375,38 @@ class EventReviewCog(commands.Cog):
         emoji = TAG_EMOJI.get(tag, "✨")
         color = TAG_COLOR.get(tag, discord.Color.from_rgb(200, 255, 0))
 
+        country = _resolve_country(event)
+        flag = COUNTRY_FLAG.get(country, "🌍")
+        lbl = COUNTRY_LABELS.get(country, COUNTRY_LABELS["SK"])
+
         emb = discord.Embed(
-            title=f"{emoji} {(event.get('title') or '')[:253]}",
+            title=f"{flag} {emoji} {(event.get('title') or '')[:250]}",
             url=event.get("source_url") or None,
             color=color,
         )
 
-        # Description block
         desc_lines = []
         if event.get("description"):
             desc_lines.append(event["description"])
         if event.get("date"):
-            d_line = f"\n**Datum:** {event['date']}"
+            d_line = f"\n**{lbl['date']}:** {event['date']}"
             if event.get("time_start"):
                 d_line += f" o {event['time_start']}"
             desc_lines.append(d_line)
         if event.get("duration"):
-            desc_lines.append(f"**Trvanie:** {event['duration']}")
+            desc_lines.append(f"**{lbl['duration']}:** {event['duration']}")
         if event.get("venue"):
-            desc_lines.append(f"**Miesto:** {event['venue']}")
+            desc_lines.append(f"**{lbl['venue']}:** {event['venue']}")
         if event.get("address"):
-            desc_lines.append(f"**Adresa:** {event['address']}")
+            desc_lines.append(f"**{lbl['address']}:** {event['address']}")
         if event.get("city"):
-            desc_lines.append(f"**Mesto:** {event['city']}")
-        desc_lines.append("\n**Vstup: Zadarmo**")
+            desc_lines.append(f"**{lbl['city']}:** {flag} {event['city']}")
+        desc_lines.append(f"\n**{lbl['free']}**")
 
         emb.description = "\n".join(desc_lines)
         emb.add_field(name="Tag", value=f"{emoji} {tag}", inline=True)
         emb.add_field(name="Zdroj", value=(event.get("source") or "").upper(), inline=True)
+        emb.add_field(name="Krajina", value=f"{flag} {country}", inline=True)
 
         if event.get("photo_url"):
             emb.set_image(url=event["photo_url"])
@@ -379,6 +435,7 @@ def _row_to_event(row: dict) -> dict:
         "venue": row.get("venue") or "",
         "address": row.get("address") or "",
         "city": row.get("city") or "",
+        "country": row.get("country") or "",
         "photo_url": row.get("photo_url") or "",
         "source_url": row.get("source_url") or "",
         "source": row.get("source") or "",

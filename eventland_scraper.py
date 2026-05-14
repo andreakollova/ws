@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Eventland.eu Slovakia event scraper.
-Scrapes the /zadarmo/ (free) listing pages directly — no paid-event filtering needed.
+Eventland.eu event scraper — Bratislava, Košice, Vienna, Prague.
+Scrapes the /zadarmo/ and /free-events/ listing pages (free events only).
 Respects polite crawl delay.
 """
 
@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 LISTING_URLS = [
     "https://eventland.eu/sk/bratislava-sk/zadarmo/",
     "https://eventland.eu/sk/kosice-sk/zadarmo/",
+    "https://eventland.eu/vienna/free-events/",
+    "https://eventland.eu/prague/free-events/",
 ]
 BASE_URL = "https://eventland.eu"
 HEADERS = {
@@ -30,15 +32,36 @@ HEADERS = {
 MAX_EVENTS = 20
 CRAWL_DELAY = 1.5
 
-# Eventland event URL: /sk/{city}/event/{id}/{slug}/
+# Eventland event URL: /{locale?}/{city}/event/{id}/{slug}/
 EVENT_URL_RE = re.compile(
-    r"^https?://eventland\.eu/sk/[^/]+/event/\d+/[^/]+/?$", re.I
+    r"^https?://eventland\.eu/(?:[a-z]{2}/)?[^/]+/event/\d+/[^/]+/?$", re.I
 )
 
 # City slug → display name
 CITY_MAP = {
     "bratislava-sk": "Bratislava",
     "kosice-sk": "Košice",
+    "vienna-at": "Vienna",
+    "vienna": "Vienna",
+    "prague-cz": "Prague",
+    "prague": "Prague",
+}
+
+# Country name strings to strip from addresses
+COUNTRY_NAMES = {
+    "slovensko", "slovakia", "sk",
+    "österreich", "austria", "at",
+    "česká republika", "czech republic", "czechia", "cz",
+}
+
+# City slug → country (ISO 3166-1 alpha-2)
+CITY_COUNTRY = {
+    "bratislava-sk": "SK",
+    "kosice-sk": "SK",
+    "vienna-at": "AT",
+    "vienna": "AT",
+    "prague-cz": "CZ",
+    "prague": "CZ",
 }
 
 
@@ -147,10 +170,12 @@ def _scrape_event_detail(url: str) -> dict | None:
     if not title:
         return None
 
-    # --- Date ---
+    # --- Date + Time ---
     start_date = ""
+    time_start = ""
     if jsonld and jsonld.get("startDate"):
         start_date = _parse_iso_date(jsonld["startDate"])
+        time_start = _parse_iso_time(jsonld["startDate"])
     if not start_date and data_ul and items:
         start_date = _parse_sk_date(items[0])
 
@@ -173,16 +198,20 @@ def _scrape_event_detail(url: str) -> dict | None:
     venue = ""
     address = ""
     city = _city_from_url(url)
+    country = _country_from_url(url)
 
     if jsonld and isinstance(jsonld.get("location"), dict):
         loc = jsonld["location"]
+        venue = (loc.get("name") or "").strip()
         addr_obj = loc.get("address", {})
         if isinstance(addr_obj, dict):
-            addr_name = addr_obj.get("name", "")
-            # "TK SLÁVIA STU BRATISLAVA, Májová 21, Petržalka, Slovensko"
+            addr_name = addr_obj.get("name", "") or addr_obj.get("streetAddress", "")
             parts = [p.strip() for p in addr_name.split(",")]
-            venue = parts[0] if parts else ""
-            address = ", ".join(parts[:-1]) if len(parts) > 1 else addr_name
+            clean_parts = [p for p in parts if p.lower() not in COUNTRY_NAMES]
+            if not venue:
+                venue = clean_parts[0] if clean_parts else ""
+            addr_parts = clean_parts[1:] if len(clean_parts) > 1 else clean_parts
+            address = ", ".join(addr_parts) if addr_parts else addr_name
         elif isinstance(addr_obj, str):
             address = addr_obj
 
@@ -192,11 +221,12 @@ def _scrape_event_detail(url: str) -> dict | None:
         "title": title,
         "original_description": description,
         "date": start_date,
-        "time_start": "",
+        "time_start": time_start,
         "duration": "",
         "venue": venue,
         "address": address,
         "city": city,
+        "country": country,
         "photo_url": image,
         "min_price": 0.0 if not price_raw or "€" not in price_raw else 999.0,
         "price_raw": price_raw,
@@ -229,6 +259,17 @@ def _parse_iso_date(date_str: str) -> str:
         return ""
 
 
+def _parse_iso_time(date_str: str) -> str:
+    """'2026-05-23T14:00:00' → '14:00', '2026-05-23' → ''"""
+    try:
+        if "T" in date_str:
+            time_part = date_str.split("T")[1][:5]  # "14:00"
+            return time_part if ":" in time_part else ""
+        return ""
+    except Exception:
+        return ""
+
+
 def _parse_sk_date(date_str: str) -> str:
     """'23.05.2026' or '23.05.2026 - 25.05.2026' → '2026-05-23'"""
     # Take only the start date if it's a range
@@ -244,10 +285,22 @@ def _parse_sk_date(date_str: str) -> str:
 
 def _city_from_url(url: str) -> str:
     """Extract city name from Eventland URL slug."""
-    m = re.search(r"/sk/([^/]+)/event/", url)
+    # Matches /{locale}/{city}/event/ or /{city}/event/
+    m = re.search(r"/(?:[a-z]{2}/)?([^/]+)/event/", url)
     if m:
-        return CITY_MAP.get(m.group(1), m.group(1).replace("-sk", "").capitalize())
+        slug = m.group(1)
+        if slug in CITY_MAP:
+            return CITY_MAP[slug]
+        return slug.split("-")[0].capitalize()
     return ""
+
+
+def _country_from_url(url: str) -> str:
+    """Extract country code from Eventland URL slug."""
+    m = re.search(r"/(?:[a-z]{2}/)?([^/]+)/event/", url)
+    if m:
+        return CITY_COUNTRY.get(m.group(1), "SK")
+    return "SK"
 
 
 def _is_free(event: dict) -> bool:

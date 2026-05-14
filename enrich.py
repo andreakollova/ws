@@ -20,12 +20,24 @@ VALID_TAGS = [
     "gaming", "conference", "priroda", "historia", "zaujimave",
 ]
 
-SYSTEM_PROMPT = """\
-You are an assistant for Woeva, a Slovak community events app. Your job is to enrich event data.
+# City → ISO language name used in GPT prompt
+CITY_LANGUAGE: dict[str, str] = {
+    "Bratislava": "Slovak",
+    "Košice": "Slovak",
+    "Kosice": "Slovak",
+    "Vienna": "German",
+    "Wien": "German",
+    "Prague": "Czech",
+    "Praha": "Czech",
+    "London": "English",
+}
+
+SYSTEM_PROMPT_TEMPLATE = """\
+You are an assistant for Woeva, a community events app. Your job is to enrich event data.
 
 Given an event, you must return a JSON object with two fields:
 
-1. "description": A SHORT, fun, inviting description in SLOVAK language.
+1. "description": A SHORT, fun, inviting description in {language} language.
    - Start with EXACTLY ONE relevant emoji
    - After the emoji: max 29 words (the emoji does not count toward the word limit)
    - Tone: casual, exciting, welcoming — make people want to go
@@ -46,7 +58,7 @@ Given an event, you must return a JSON object with two fields:
 Rules:
 - If unsure, use "zaujimave"
 - Return ONLY valid JSON — no preamble, no explanation
-- "description" must start with a single emoji character followed by a space and Slovak text
+- "description" must start with a single emoji character followed by a space and {language} text
 """
 
 USER_TEMPLATE = """\
@@ -57,7 +69,7 @@ Venue: {venue}
 City: {city}
 Date: {date}  Time: {time}
 
-Return JSON: {{"description": "<emoji> <max 29 Slovak words>", "tag": "<one_tag>"}}
+Return JSON: {{"description": "<emoji> <max 29 {language} words>", "tag": "<one_tag>"}}
 """
 
 
@@ -66,6 +78,8 @@ def enrich_event(event: dict) -> dict:
     api_key = os.environ.get("OPENAI_API_KEY")
     description = ""
     tag = "zaujimave"
+    city = event.get("city", "")
+    language = CITY_LANGUAGE.get(city, "Slovak")
 
     if api_key:
         try:
@@ -73,9 +87,10 @@ def enrich_event(event: dict) -> dict:
                 title=event.get("title", ""),
                 description=(event.get("original_description") or "")[:600],
                 venue=event.get("venue", ""),
-                city=event.get("city", ""),
+                city=city,
                 date=event.get("date", ""),
                 time=event.get("time_start", ""),
+                language=language,
             )
             description = result.get("description", "").strip()
             tag = result.get("tag", "zaujimave")
@@ -102,7 +117,8 @@ def enrich_event(event: dict) -> dict:
         "duration": event.get("duration", "") or None,
         "venue": event.get("venue", "") or None,
         "address": event.get("address", "") or None,
-        "city": event.get("city", "") or None,
+        "city": city or None,
+        "country": event.get("country", "SK") or "SK",
         "price": "Zadarmo",
         "photo_url": event.get("photo_url", "") or None,
         "scraped_at": datetime.now(timezone.utc).isoformat(),
@@ -112,8 +128,9 @@ def enrich_event(event: dict) -> dict:
     }
 
 
-def _call_gpt(title: str, description: str, venue: str, city: str, date: str, time: str) -> dict:
+def _call_gpt(title: str, description: str, venue: str, city: str, date: str, time: str, language: str = "Slovak") -> dict:
     client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    system_prompt = SYSTEM_PROMPT_TEMPLATE.format(language=language)
     prompt = USER_TEMPLATE.format(
         title=title or "(no title)",
         description=description or "(no description available)",
@@ -121,12 +138,13 @@ def _call_gpt(title: str, description: str, venue: str, city: str, date: str, ti
         city=city or "(unknown city)",
         date=date or "(unknown date)",
         time=time or "(unknown time)",
+        language=language,
     )
     response = client.chat.completions.create(
         model="gpt-4o",
         max_tokens=150,
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt},
         ],
         temperature=0.5,
