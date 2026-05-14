@@ -282,7 +282,7 @@ class EditEventModal(discord.ui.Modal, title="Upraviť event"):
             desc_lines.append(f"\n**{lbl['free']}**")
 
             emb = old.copy()
-            emb.title = f"{flag} {emoji} {e['title'][:250]}"
+            emb.title = e['title'][:256]
             emb.description = "\n".join(desc_lines)
             emb.set_footer(text=f"✏️ Upravené — {interaction.user.display_name}")
             await interaction.message.edit(embed=emb)
@@ -492,8 +492,15 @@ class EventReviewCog(commands.Cog):
         flag = COUNTRY_FLAG.get(country, "🌍")
         lbl = COUNTRY_LABELS.get(country, COUNTRY_LABELS["SK"])
 
+        raw_title = (event.get('title') or '').strip()
+        venue_prefix = (event.get('venue') or '').strip()
+        if venue_prefix and not raw_title.lower().startswith(venue_prefix.lower()):
+            full_title = f"{venue_prefix} {raw_title}"
+        else:
+            full_title = raw_title
+
         emb = discord.Embed(
-            title=f"{emoji} {(event.get('title') or '')[:253]}",
+            title=full_title[:256],
             url=event.get("source_url") or None,
             color=color,
         )
@@ -513,11 +520,11 @@ class EventReviewCog(commands.Cog):
         if event.get("address"):
             desc_lines.append(f"**{lbl['address']}:** {event['address']}")
         if event.get("city"):
-            desc_lines.append(f"**{lbl['city']}:** {flag} {event['city']}")
+            desc_lines.append(f"**{lbl['city']}:** {event['city']}")
         desc_lines.append(f"\n**{lbl['free']}**")
 
         emb.description = "\n".join(desc_lines)
-        emb.add_field(name="Tag", value=f"{emoji} {tag}", inline=True)
+        emb.add_field(name="Tag", value=tag, inline=True)
         emb.add_field(name="Zdroj", value=(event.get("source") or "").upper(), inline=True)
         emb.add_field(name="Krajina", value=f"{flag} {country}", inline=True)
 
