@@ -428,17 +428,23 @@ class EventReviewCog(commands.Cog):
             from supabase import create_client
             db = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-            # Atomically claim unclaimed events (discord_sent IS NULL or FALSE)
-            claim = (
+            # Select unclaimed events first
+            select_res = (
                 db.table("scraped_events")
-                .update({"discord_sent": True})
+                .select("id, title, description, tag, date, time_start, duration, venue, address, city, country, photo_url, source_url, source")
                 .or_("discord_sent.is.null,discord_sent.eq.false")
                 .eq("approved", False)
                 .eq("rejected", False)
+                .order("scraped_at", desc=False)
+                .limit(20)
                 .execute()
             )
+            new_events = select_res.data or []
 
-            new_events = list(reversed(claim.data or []))
+            if new_events:
+                # Mark them as claimed
+                ids = [row["id"] for row in new_events]
+                db.table("scraped_events").update({"discord_sent": True}).in_("id", ids).execute()
 
             channel = self.bot.get_channel(DISCORD_CHANNEL_ID)
             if not channel:
