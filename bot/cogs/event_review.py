@@ -428,18 +428,19 @@ class EventReviewCog(commands.Cog):
             from supabase import create_client
             db = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-            # Select unclaimed events first
+            # Select unclaimed events — handle both null and false for approved/rejected
             select_res = (
                 db.table("scraped_events")
                 .select("id, title, description, tag, date, time_start, duration, venue, address, city, country, photo_url, source_url, source")
                 .or_("discord_sent.is.null,discord_sent.eq.false")
-                .eq("approved", False)
-                .eq("rejected", False)
+                .or_("approved.is.null,approved.eq.false")
+                .or_("rejected.is.null,rejected.eq.false")
                 .order("scraped_at", desc=False)
                 .limit(20)
                 .execute()
             )
             new_events = select_res.data or []
+            logger.info(f"Poll: found {len(new_events)} unclaimed events")
 
             if new_events:
                 # Mark them as claimed
