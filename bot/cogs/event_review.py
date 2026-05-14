@@ -274,7 +274,7 @@ class EditEventModal(discord.ui.Modal, title="Upraviť event"):
             if e.get("venue"):
                 desc_lines.append(f"**{lbl['venue']}:** {e['venue']}")
             if e.get("city"):
-                desc_lines.append(f"**{lbl['city']}:** {flag} {e['city']}")
+                desc_lines.append(f"**{lbl['city']}:** {e['city']}")
             desc_lines.append(f"\n**{lbl['free']}**")
 
             emb = old.copy()
@@ -489,7 +489,7 @@ class EventReviewCog(commands.Cog):
         lbl = COUNTRY_LABELS.get(country, COUNTRY_LABELS["SK"])
 
         emb = discord.Embed(
-            title=f"{flag} {emoji} {(event.get('title') or '')[:250]}",
+            title=f"{emoji} {(event.get('title') or '')[:253]}",
             url=event.get("source_url") or None,
             color=color,
         )
