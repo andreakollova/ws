@@ -28,6 +28,7 @@ from goout_scraper import scrape_goout
 from tootoot_scraper import scrape_tootoot
 from eventland_scraper import scrape_eventland
 from petrzalka_scraper import scrape_petrzalka
+from visitkosice_scraper import scrape_visitkosice
 from enrich import enrich_event
 
 logging.basicConfig(
@@ -92,6 +93,14 @@ def main():
         raw_events.extend(petrzalka_events)
     except Exception as e:
         logger.error(f"Petržalka scraper failed: {e}", exc_info=True)
+
+    # VisitKošice — free events
+    try:
+        kosice_events = scrape_visitkosice(existing_urls)
+        logger.info(f"VisitKošice: {len(kosice_events)} new free events")
+        raw_events.extend(kosice_events)
+    except Exception as e:
+        logger.error(f"VisitKošice scraper failed: {e}", exc_info=True)
 
     saved = 0
     for event in raw_events:
