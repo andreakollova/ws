@@ -1,11 +1,15 @@
 import asyncio
 import logging
+from pathlib import Path
 
 import discord
 from discord.ext import commands
 
 from config import DISCORD_BOT_TOKEN, DISCORD_CHANNEL_ID
 from database import init_db
+
+BOT_NAME = "Woeva Picks"
+AVATAR_PATH = Path(__file__).parent / "woevapicks.jpg"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,6 +40,21 @@ class WoevaBot(commands.Bot):
             logger.info(f"Review channel: #{ch.name} ({ch.id})")
         else:
             logger.warning(f"Review channel NOT FOUND — check DISCORD_CHANNEL_ID={DISCORD_CHANNEL_ID}")
+        await self._sync_profile()
+
+    async def _sync_profile(self):
+        """Update bot username and avatar if they differ from desired values."""
+        try:
+            kwargs = {}
+            if self.user.name != BOT_NAME:
+                kwargs["username"] = BOT_NAME
+            if AVATAR_PATH.exists():
+                kwargs["avatar"] = AVATAR_PATH.read_bytes()
+            if kwargs:
+                await self.user.edit(**kwargs)
+                logger.info(f"Bot profile updated: {kwargs.keys()}")
+        except discord.HTTPException as e:
+            logger.warning(f"Could not update bot profile (rate limit?): {e}")
 
     async def on_message(self, message: discord.Message):
         if message.author == self.user:
