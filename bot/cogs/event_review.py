@@ -295,7 +295,8 @@ class EventReviewCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._lock = asyncio.Lock()
-        self._last_event_sent: datetime | None = None
+        # Initialise to now so the no-events notice doesn't fire immediately on startup
+        self._last_event_sent: datetime = datetime.now(timezone.utc)
         self._last_no_events_notice: datetime | None = None
         self.poll_events.start()
 
@@ -386,7 +387,7 @@ class EventReviewCog(commands.Cog):
         interval = timedelta(hours=NO_EVENTS_INTERVAL_H)
 
         # Don't send if we just sent real events recently
-        if self._last_event_sent and (now - self._last_event_sent) < interval:
+        if (now - self._last_event_sent) < interval:
             return
         # Don't repeat the notice within the same interval
         if self._last_no_events_notice and (now - self._last_no_events_notice) < interval:
