@@ -22,7 +22,7 @@ LISTING_CONFIGS = [
     {"url": "https://www.eventbrite.com/d/united-kingdom--london/free--music--events/", "city": "London", "country": "GB"},
     {"url": "https://www.eventbrite.com/d/austria--wien/free--music--events/", "city": "Vienna", "country": "AT"},
 ]
-MAX_PAGES = 3
+MAX_PAGES = 2
 CRAWL_DELAY = 1.2
 
 HEADERS = {
