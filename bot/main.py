@@ -31,6 +31,7 @@ class WoevaBot(commands.Bot):
     async def setup_hook(self):
         await init_db()
         await self.load_extension("cogs.event_review")
+        await self.load_extension("cogs.oscar")
         logger.info("Extensions loaded")
 
     async def on_ready(self):
