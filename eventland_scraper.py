@@ -28,8 +28,8 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "sk-SK,sk;q=0.9,en;q=0.5",
 }
-MAX_EVENTS = 15
-MAX_CHECKS = 25   # stop after checking this many unknown URLs
+MAX_EVENTS = 30
+MAX_CHECKS_PER_LISTING = 15   # stop after checking this many unknown URLs per listing page
 CRAWL_DELAY = 0.8
 
 # Eventland event URL: /{locale?}/{city}/event/{id}/{slug}/
@@ -68,7 +68,7 @@ CITY_COUNTRY = {
 def scrape_eventland(existing_urls: set) -> list[dict]:
     """Return list of raw free event dicts scraped from Eventland Slovakia."""
     events = []
-    all_event_entries: list[tuple[str, str]] = []  # (url, listing_image)
+    seen_urls: set[str] = set()
 
     for listing_url in LISTING_URLS:
         logger.info(f"Fetching Eventland listing: {listing_url}")
@@ -79,40 +79,38 @@ def scrape_eventland(existing_urls: set) -> list[dict]:
         soup = BeautifulSoup(r.text, "html.parser")
         found = _extract_event_urls(soup)
         logger.info(f"  Found {len(found)} event links")
-        all_event_entries.extend(found)
 
-    seen_urls: set[str] = set()
-    checks = 0
-    for url, listing_image in all_event_entries:
-        if url in seen_urls:
-            continue
-        seen_urls.add(url)
+        checks = 0
+        for url, listing_image in found:
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
 
-        if url in existing_urls:
-            logger.debug(f"Skip (known): {url}")
-            continue
+            if url in existing_urls:
+                logger.debug(f"Skip (known): {url}")
+                continue
 
-        if checks >= MAX_CHECKS:
-            logger.info(f"Eventland: reached MAX_CHECKS ({MAX_CHECKS}), stopping early")
-            break
-        checks += 1
+            if checks >= MAX_CHECKS_PER_LISTING:
+                logger.info(f"Eventland: reached MAX_CHECKS_PER_LISTING for {listing_url}")
+                break
+            checks += 1
 
-        time.sleep(CRAWL_DELAY)
-        event = _scrape_event_detail(url, listing_image=listing_image)
-        if not event:
-            continue
+            time.sleep(CRAWL_DELAY)
+            event = _scrape_event_detail(url, listing_image=listing_image)
+            if not event:
+                continue
 
-        if not _is_free(event):
-            logger.debug(f"Not free (price={event.get('price_raw')}): {event['title'][:40]}")
-            continue
+            if not _is_free(event):
+                logger.debug(f"Not free (price={event.get('price_raw')}): {event['title'][:40]}")
+                continue
 
-        if _is_past(event.get("date", "")):
-            logger.debug(f"Skip past event ({event['date']}): {event['title'][:40]}")
-            continue
+            if _is_past(event.get("date", "")):
+                logger.debug(f"Skip past event ({event['date']}): {event['title'][:40]}")
+                continue
 
-        logger.info(f"Free event found: {event['title'][:60]}")
-        events.append(event)
-        existing_urls.add(url)
+            logger.info(f"Free event found: {event['title'][:60]}")
+            events.append(event)
+            existing_urls.add(url)
 
         if len(events) >= MAX_EVENTS:
             break
