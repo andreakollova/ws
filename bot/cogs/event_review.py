@@ -215,9 +215,20 @@ async def _publish_event(event: dict, post_ig: bool) -> str:
         if fake_ids_raw and result.data and country == "SK":
             event_id = result.data[0]["id"]
             fake_ids = [x.strip() for x in fake_ids_raw.split(",") if x.strip()]
+            # First 16 have photos, last 9 don't (matches create_bots.py order)
+            with_photo = fake_ids[:16]
+            no_photo = fake_ids[16:]
             count = random.choices([0, 0, 1, 1, 1, 2, 2, 3], k=1)[0]
             if count > 0:
-                chosen = random.sample(fake_ids, min(count, len(fake_ids)))
+                if count == 1:
+                    chosen = random.sample(fake_ids, 1)
+                elif count == 2:
+                    # 1 with photo + 1 without
+                    chosen = random.sample(with_photo, 1) + random.sample(no_photo, 1)
+                else:
+                    # 2 with photo + 1 without
+                    chosen = random.sample(with_photo, 2) + random.sample(no_photo, 1)
+                random.shuffle(chosen)
                 asyncio.ensure_future(_add_fake_attendees_staggered(event_id, chosen))
     except Exception as e:
         logger.warning(f"Fake attendees failed: {e}")
