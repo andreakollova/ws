@@ -29,7 +29,6 @@ from eventland_scraper import scrape_eventland
 from petrzalka_scraper import scrape_petrzalka
 from visitkosice_scraper import scrape_visitkosice
 from eventbrite_scraper import scrape_eventbrite
-from kudyznudy_scraper import scrape_kudyznudy
 from heylo_scraper import scrape_heylo
 from enrich import enrich_event
 
@@ -103,14 +102,6 @@ def main():
         raw_events.extend(eventbrite_events)
     except Exception as e:
         logger.error(f"Eventbrite scraper failed: {e}", exc_info=True)
-
-    # KudyZNudy Prague — free events
-    try:
-        kudyznudy_events = scrape_kudyznudy(existing_urls)
-        logger.info(f"KudyZNudy Prague: {len(kudyznudy_events)} new free events")
-        raw_events.extend(kudyznudy_events)
-    except Exception as e:
-        logger.error(f"KudyZNudy scraper failed: {e}", exc_info=True)
 
     # Heylo groups (Piatkovica Bratislava, ...)
     try:
