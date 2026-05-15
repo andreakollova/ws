@@ -176,26 +176,23 @@ def _looks_free(raw: dict) -> bool:
 
 
 def _parse_event(raw: dict, group: dict) -> dict | None:
-    group_id = group["group_id"]
-
     # Title
     title = (raw.get("name") or raw.get("title") or raw.get("eventName") or "").strip()
     if not title:
         return None
 
-    # Event ID and source URL
+    # Event ID and source URL — correct Heylo event URL format
     event_id = raw.get("id") or raw.get("eventId") or ""
     if event_id:
-        source_url = f"https://www.heylo.com/g/{group_id}/e/{event_id}"
+        source_url = f"https://www.heylo.com/event/{event_id}?redirect=0&context=group-page"
     else:
-        source_url = f"https://www.heylo.com/g/{group_id}"
+        source_url = f"https://www.heylo.com/g/{group['group_id']}"
 
     # Date + time from startTime (Unix timestamp in ms or s)
     start_ts = raw.get("startTime") or raw.get("startDate") or 0
     date_str = ""
     time_str = ""
     if start_ts:
-        # Heylo uses milliseconds
         if start_ts > 1e10:
             start_ts = start_ts / 1000
         try:
@@ -205,25 +202,37 @@ def _parse_event(raw: dict, group: dict) -> dict | None:
         except Exception:
             pass
 
-    # Description
+    # Description from group page data
     description = (
         raw.get("description") or raw.get("body") or raw.get("about") or ""
     ).strip()[:1000]
 
-    # Image
+    # Image — try multiple field names
     image_url = (
-        raw.get("imageUrl") or raw.get("coverUrl") or raw.get("photo") or
-        raw.get("image") or raw.get("coverPhoto") or None
+        raw.get("imageUrl") or raw.get("coverUrl") or raw.get("coverImageUrl") or
+        raw.get("photo") or raw.get("image") or raw.get("coverPhoto") or
+        raw.get("thumbnailUrl") or None
     )
 
-    # Venue
-    venue = (
-        raw.get("location") or raw.get("venue") or raw.get("address") or
-        raw.get("locationName") or ""
+    # Venue — may be string or dict
+    venue_raw = (
+        raw.get("locationName") or raw.get("location") or
+        raw.get("venue") or raw.get("address") or ""
     )
-    if isinstance(venue, dict):
-        venue = venue.get("name") or venue.get("address") or ""
-    venue = str(venue).strip()
+    if isinstance(venue_raw, dict):
+        venue_raw = venue_raw.get("name") or venue_raw.get("address") or ""
+    venue = str(venue_raw).strip()
+
+    # If image or description missing, fetch the event detail page
+    if (not image_url or not description) and event_id:
+        detail = _fetch_event_detail(event_id)
+        if detail:
+            if not image_url:
+                image_url = detail.get("image_url")
+            if not description:
+                description = detail.get("description", "")
+            if not venue:
+                venue = detail.get("venue", "")
 
     return {
         "source_url": source_url,
@@ -243,6 +252,59 @@ def _parse_event(raw: dict, group: dict) -> dict | None:
         "is_free": True,
         "price": 0.0,
     }
+
+
+def _fetch_event_detail(event_id: str) -> dict | None:
+    """Fetch individual Heylo event page and extract image/description."""
+    url = f"https://www.heylo.com/event/{event_id}?redirect=0&context=group-page"
+    time.sleep(CRAWL_DELAY)
+    r = _fetch(url)
+    if r is None:
+        return None
+    soup = BeautifulSoup(r.text, "html.parser")
+
+    # Try __NEXT_DATA__ first
+    next_data = _extract_next_data(soup)
+    if next_data:
+        # Walk to find event detail object
+        event_obj = _find_event_by_id(next_data, event_id)
+        if event_obj:
+            image_url = (
+                event_obj.get("imageUrl") or event_obj.get("coverUrl") or
+                event_obj.get("coverImageUrl") or event_obj.get("photo") or None
+            )
+            description = (event_obj.get("description") or event_obj.get("body") or "").strip()[:1000]
+            venue_raw = event_obj.get("locationName") or event_obj.get("location") or ""
+            if isinstance(venue_raw, dict):
+                venue_raw = venue_raw.get("name") or ""
+            return {"image_url": image_url, "description": description, "venue": str(venue_raw).strip()}
+
+    # Fallback: og:image + og:description
+    og_image = soup.find("meta", property="og:image")
+    og_desc = soup.find("meta", property="og:description")
+    image_url = og_image.get("content", "").strip() if og_image else None
+    description = og_desc.get("content", "").strip()[:1000] if og_desc else ""
+    return {"image_url": image_url, "description": description, "venue": ""}
+
+
+def _find_event_by_id(data: dict, event_id: str) -> dict | None:
+    """Walk __NEXT_DATA__ to find the event dict matching event_id."""
+    def _walk(obj):
+        if isinstance(obj, dict):
+            if obj.get("id") == event_id or obj.get("eventId") == event_id:
+                if _looks_like_event(obj):
+                    return obj
+            for v in obj.values():
+                result = _walk(v)
+                if result:
+                    return result
+        elif isinstance(obj, list):
+            for item in obj:
+                result = _walk(item)
+                if result:
+                    return result
+        return None
+    return _walk(data)
 
 
 def _is_past(date_str: str) -> bool:
