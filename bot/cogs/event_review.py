@@ -387,7 +387,7 @@ class EventReviewCog(commands.Cog):
         self.poll_events.cancel()
 
     async def cog_load(self):
-        """Re-register persistent views for all pending events on bot startup."""
+        """On startup: re-register views AND resend any claimed-but-unsent events."""
         try:
             from supabase import create_client
             db = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -401,15 +401,39 @@ class EventReviewCog(commands.Cog):
                 .limit(100)
                 .execute()
             )
-            count = 0
+            restored = 0
+            to_resend = []
             for row in result.data or []:
                 event = _row_to_event(row)
                 self.bot.add_view(EventConfirmView(event))
-                count += 1
-            if count:
-                logger.info(f"Restored {count} persistent EventConfirmView(s)")
+                restored += 1
+                # If not in local SQLite, this event was claimed but never sent — queue for resend
+                if not await is_processed(str(row["id"])):
+                    to_resend.append(row)
+
+            if restored:
+                logger.info(f"Restored {restored} persistent EventConfirmView(s), {len(to_resend)} need resend")
+
+            if to_resend:
+                asyncio.ensure_future(self._resend_stuck_events(to_resend))
         except Exception as e:
             logger.warning(f"Could not restore views on startup: {e}")
+
+    async def _resend_stuck_events(self, rows: list[dict]):
+        """Resend events that were claimed (discord_sent=True) but never actually sent."""
+        await self.bot.wait_until_ready()
+        await asyncio.sleep(5)
+        channel = self.bot.get_channel(DISCORD_CHANNEL_ID)
+        if not channel:
+            logger.error(f"Resend: channel {DISCORD_CHANNEL_ID} not found")
+            return
+        for row in rows:
+            try:
+                event = _row_to_event(row)
+                await self._send_event(channel, event)
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                logger.error(f"Resend failed for {row['id']}: {e}")
 
     @tasks.loop(seconds=POLL_INTERVAL)
     async def poll_events(self):

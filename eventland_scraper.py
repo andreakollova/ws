@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 LISTING_URLS = [
     "https://eventland.eu/sk/bratislava-sk/zadarmo/",
-    "https://eventland.eu/vienna/free-events/",
     "https://eventland.eu/prague/free-events/",
 ]
 BASE_URL = "https://eventland.eu"
@@ -208,13 +207,15 @@ def _scrape_event_detail(url: str, listing_image: str = "") -> dict | None:
         if img_val and "logo" not in img_val.lower() and not img_val.lower().endswith(".svg"):
             image = img_val
     if not image:
-        # Fallback: first img inside item-listing--image link or any featured image
-        img_el = soup.select_one("a.item-listing--image img, .item-listing--image img, img.img-fluid")
-        if img_el:
-            image = img_el.get("src") or img_el.get("data-src") or ""
-    if not image:
-        # Last resort: use the image captured directly from the listing page
+        # Listing page image is guaranteed correct — use it before generic selectors
         image = listing_image
+    if not image:
+        # Fallback: item-listing--image wrapper or any img.img-fluid (skip logos/SVGs)
+        for img_el in soup.select("a.item-listing--image img, .item-listing--image img, img.img-fluid"):
+            src = img_el.get("src") or img_el.get("data-src") or ""
+            if src and "logo" not in src.lower() and not src.lower().endswith(".svg"):
+                image = src
+                break
 
     # --- Venue / Address / City ---
     venue = ""

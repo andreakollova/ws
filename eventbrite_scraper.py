@@ -18,8 +18,9 @@ from bs4 import BeautifulSoup
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://www.eventbrite.com"
-LISTING_URLS = [
-    "https://www.eventbrite.com/d/united-kingdom--london/free--events/",
+LISTING_CONFIGS = [
+    {"url": "https://www.eventbrite.com/d/united-kingdom--london/free--events/", "city": "London", "country": "GB"},
+    {"url": "https://www.eventbrite.com/d/austria--wien/free--music--events/", "city": "Vienna", "country": "AT"},
 ]
 MAX_PAGES = 2
 CRAWL_DELAY = 0.8
@@ -36,48 +37,42 @@ EVENT_URL_RE = re.compile(r"^https?://www\.eventbrite\.com/e/[^/?#]+-\d+/?$", re
 
 
 def scrape_eventbrite(existing_urls: set) -> list[dict]:
-    """Return list of new free events from Eventbrite London not yet in DB."""
-    all_event_urls: list[str] = []
+    """Return list of new free events from Eventbrite (London + Vienna)."""
+    events: list[dict] = []
+    seen: set[str] = set()
 
-    for listing_url in LISTING_URLS:
+    for config in LISTING_CONFIGS:
+        listing_url = config["url"]
+        city = config["city"]
+        country = config["country"]
+
         for page in range(1, MAX_PAGES + 1):
             url = listing_url if page == 1 else f"{listing_url}?page={page}"
-            logger.info(f"Eventbrite: fetching listing page {page}")
+            logger.info(f"Eventbrite {city}: fetching page {page}")
             r = _fetch(url)
             if r is None:
                 break
             soup = BeautifulSoup(r.text, "html.parser")
             found = _extract_event_urls(soup)
-            logger.info(f"  Found {len(found)} event links on page {page}")
+            logger.info(f"  Found {len(found)} event links")
             if not found:
                 break
-            all_event_urls.extend(found)
+
+            for event_url in found:
+                if event_url in seen or event_url in existing_urls:
+                    continue
+                seen.add(event_url)
+                time.sleep(CRAWL_DELAY)
+                event = _scrape_event_detail(event_url, city=city, country=country)
+                if not event:
+                    continue
+                if _is_past(event.get("date", "")):
+                    continue
+                logger.info(f"Eventbrite {city}: {event['title'][:60]}")
+                events.append(event)
+                existing_urls.add(event_url)
+
             time.sleep(CRAWL_DELAY)
-
-    seen: set[str] = set()
-    events: list[dict] = []
-
-    for url in all_event_urls:
-        if url in seen:
-            continue
-        seen.add(url)
-
-        if url in existing_urls:
-            logger.debug(f"Skip (known): {url}")
-            continue
-
-        time.sleep(CRAWL_DELAY)
-        event = _scrape_event_detail(url)
-        if not event:
-            continue
-
-        if _is_past(event.get("date", "")):
-            logger.debug(f"Skip past: {event['title'][:40]}")
-            continue
-
-        logger.info(f"Eventbrite free event: {event['title'][:60]}")
-        events.append(event)
-        existing_urls.add(url)
 
     logger.info(f"Eventbrite total new events: {len(events)}")
     return events
@@ -108,7 +103,7 @@ def _extract_event_urls(soup: BeautifulSoup) -> list[str]:
     return urls
 
 
-def _scrape_event_detail(url: str) -> dict | None:
+def _scrape_event_detail(url: str, city: str = "London", country: str = "GB") -> dict | None:
     r = _fetch(url)
     if r is None:
         return None
@@ -202,8 +197,8 @@ def _scrape_event_detail(url: str) -> dict | None:
         "duration": "",
         "venue": venue,
         "address": address,
-        "city": "London",
-        "country": "GB",
+        "city": city,
+        "country": country,
         "photo_url": image,
         "min_price": 0.0,
         "price_raw": "Free",
