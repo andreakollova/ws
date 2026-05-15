@@ -115,6 +115,11 @@ def scrape_page(page: int) -> list[dict]:
                 location_text = "Košice"
         else:
             location_text = loc_el.get_text(strip=True)
+        # Strip redundant city/country from address (e.g. "Venue, Košice, Slovensko" → "Venue")
+        _STRIP = {"košice", "slovensko", "slovakia", "sk"}
+        _parts = [p.strip() for p in location_text.split(",")]
+        _clean = [p for p in _parts if p.lower() not in _STRIP]
+        location_text = _clean[0] if _clean else "Košice"
 
         # Date
         date_raw = ""
@@ -159,20 +164,25 @@ def scrape_page(page: int) -> list[dict]:
             logger.debug(f"Could not parse date '{date_raw}' for '{title}' — skipping")
             continue
 
-        for iso_date in dates:
-            events.append({
-                "title": title,
-                "description": description,
-                "date": iso_date,
-                "time": time_raw or "00:00",
-                "venue": location_text,
-                "city": "Košice",
-                "image_url": image_url,
-                "source_url": source_url if len(dates) == 1 else f"{source_url}#{iso_date}",
-                "is_free": True,
-                "price": 0.0,
-                "source": "visitkosice",
-            })
+        # Only one entry per event (start date) to avoid duplicates for multi-day events
+        iso_date = dates[0]
+        events.append({
+            "title": title,
+            "original_description": description,
+            "date": iso_date,
+            "time_start": time_raw or "",
+            "duration": "",
+            "venue": location_text,
+            "address": "",
+            "city": "Košice",
+            "country": "SK",
+            "photo_url": image_url,
+            "source_url": source_url,
+            "is_free": True,
+            "min_price": 0.0,
+            "price_raw": "Vstup voľný",
+            "source": "visitkosice",
+        })
 
     return events
 
