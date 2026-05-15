@@ -203,6 +203,8 @@ def scrape_visitkosice(existing_urls: set) -> list[dict]:
                 break
 
         new = [e for e in events if e["source_url"] not in existing_urls]
+        for e in new:
+            existing_urls.add(e["source_url"])  # prevent same event appearing on multiple pages
         all_events.extend(new)
         logger.info(f"  Page {page}: {len(events)} free events, {len(new)} new")
 

@@ -203,7 +203,10 @@ def _scrape_event_detail(url: str, listing_image: str = "") -> dict | None:
     og = soup.find("meta", property="og:image")
     image = og.get("content", "").strip() if og else ""
     if not image and jsonld and jsonld.get("image"):
-        image = jsonld["image"] if isinstance(jsonld["image"], str) else (jsonld["image"] or [None])[0] or ""
+        img_val = jsonld["image"] if isinstance(jsonld["image"], str) else (jsonld["image"] or [None])[0] or ""
+        # Skip logo/SVG placeholders — eventland puts site logo in JSON-LD for some events
+        if img_val and "logo" not in img_val.lower() and not img_val.lower().endswith(".svg"):
+            image = img_val
     if not image:
         # Fallback: first img inside item-listing--image link or any featured image
         img_el = soup.select_one("a.item-listing--image img, .item-listing--image img, img.img-fluid")
