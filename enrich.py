@@ -141,6 +141,8 @@ def enrich_event(event: dict) -> dict:
         "discord_sent": False,
         "approved": False,
         "rejected": False,
+        "is_recurring": event.get("is_recurring", False),
+        "recurring_end_date": event.get("recurring_end_date") or None,
     }
 
 

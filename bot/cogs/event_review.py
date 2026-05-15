@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import random
 import re
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -153,6 +154,22 @@ def _duration_to_hours(duration_str: str) -> float:
     return total if total > 0 else 2.0
 
 
+async def _add_fake_attendees_staggered(event_id: str, user_ids: list[str]):
+    """Add fake attendees one by one with random delays (5 min – 3 hours apart)."""
+    from supabase import create_client
+    for i, uid in enumerate(user_ids):
+        # First one: 5–45 min, subsequent: 30 min – 3 h
+        delay = random.randint(5, 30) if i == 0 else random.randint(1800, 10800)
+        await asyncio.sleep(delay)
+        try:
+            db = create_client(SUPABASE_URL, SUPABASE_KEY)
+            db.table("event_attendees").insert({"event_id": event_id, "user_id": uid, "paid": True}).execute()
+            db.table("events").update({"going_count": i + 1}).eq("id", event_id).execute()
+            logger.info(f"Fake attendee {uid[:8]} added to event {event_id[:8]} (slot {i+1})")
+        except Exception as e:
+            logger.warning(f"Fake attendee insert failed: {e}")
+
+
 async def _publish_event(event: dict, post_ig: bool) -> str:
     """Copy approved event to Woeva events table. Optionally post to Instagram."""
     from supabase import create_client
@@ -177,20 +194,106 @@ async def _publish_event(event: dict, post_ig: bool) -> str:
         "time": event_time,
         "duration": duration_hours,
         "venue": venue_full or None,
-        "lat": None,
-        "lng": None,
+        "lat": event.get("lat") or None,
+        "lng": event.get("lng") or None,
         "price": 0,
         "going_count": 0,
         "is_free": True,
         "city": event.get("city") or "Slovensko",
         "country": _resolve_country(event),
+        "is_recurring": event.get("is_recurring", False),
+        "recurring_end_date": event.get("recurring_end_date") or None,
     }
 
     # Use service role (bypasses RLS) via the provided SUPABASE_KEY
-    db.table("events").insert(event_row).execute()
+    result = db.table("events").insert(event_row).execute()
+
+    # Add fake attendees for social proof (Slovak events only, staggered delays)
+    try:
+        fake_ids_raw = os.environ.get("BOT_FAKE_USER_IDS", "")
+        country = event_row.get("country", "SK")
+        if fake_ids_raw and result.data and country == "SK":
+            event_id = result.data[0]["id"]
+            fake_ids = [x.strip() for x in fake_ids_raw.split(",") if x.strip()]
+            count = random.choices([0, 0, 1, 1, 1, 2, 2, 3], k=1)[0]
+            if count > 0:
+                chosen = random.sample(fake_ids, min(count, len(fake_ids)))
+                asyncio.ensure_future(_add_fake_attendees_staggered(event_id, chosen))
+    except Exception as e:
+        logger.warning(f"Fake attendees failed: {e}")
 
     # Mark as approved in scraped_events
     db.table("scraped_events").update({"approved": True}).eq("id", event["supabase_id"]).execute()
+
+    # Send push notifications to users in the same city
+    if result.data:
+        try:
+            import httpx as _httpx
+            event_id = result.data[0]["id"]
+            city = event_row.get("city") or ""
+            tag = event_row.get("category") or ""
+            tags = [t.strip() for t in tag.split(",") if t.strip()]
+
+            # Fetch tokens: users with notifications enabled in this city
+            all_subs = db.table("profiles").select("id, push_token") \
+                .eq("notifications_enabled", True) \
+                .eq("notif_new_event_all", True) \
+                .eq("city", city) \
+                .neq("id", BOT_USER_ID) \
+                .not_("push_token", "is", None) \
+                .execute().data or []
+
+            tag_subs = []
+            if tags:
+                tag_subs = db.table("profiles").select("id, push_token") \
+                    .eq("notifications_enabled", True) \
+                    .eq("notif_new_event_my_tags", True) \
+                    .eq("city", city) \
+                    .neq("id", BOT_USER_ID) \
+                    .not_("push_token", "is", None) \
+                    .execute().data or []
+
+            seen = set()
+            tokens = []
+            for row in all_subs + tag_subs:
+                if row["id"] not in seen and row.get("push_token"):
+                    seen.add(row["id"])
+                    tokens.append(row["push_token"])
+
+            if tokens:
+                title = event.get("title", "")
+                city = event_row.get("city") or "Bratislava"
+                country = event_row.get("country", "SK")
+                if country == "SK":
+                    templates = [
+                        ("🎉", "Nový event v tvojom meste", title),
+                        ("👀", "Nezmeškaš toto?", title),
+                        ("📍", f"Čosi sa deje v {city}", title),
+                        ("🗓️", "Ešte nemáš plán na víkend?", title),
+                        ("✨", "Zadarmo a stojí za to", title),
+                        ("🔥", "Práve pribudol nový event", title),
+                        ("🎶", "Dobré správy pre tvoj víkend", title),
+                    ]
+                else:
+                    templates = [
+                        ("🎉", "New event in your city", title),
+                        ("👀", "Don't miss this one", title),
+                        ("📍", f"Something's happening in {city}", title),
+                        ("🗓️", "No plans yet?", title),
+                        ("✨", "Free and worth it", title),
+                        ("🔥", "Just added near you", title),
+                        ("🎶", "Good news for your weekend", title),
+                    ]
+                emoji, notif_title, notif_body = random.choice(templates)
+                async with _httpx.AsyncClient(timeout=15) as hc:
+                    await hc.post(
+                        f"{SUPABASE_URL}/functions/v1/send-push",
+                        headers={"Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "application/json"},
+                        json={"tokens": tokens, "title": f"{emoji} {notif_title}", "body": notif_body, "data": {"event_id": event_id, "type": "new_event"}},
+                    )
+                logger.info(f"Push sent to {len(tokens)} users for event {event_id[:8]}")
+        except Exception as e:
+            logger.warning(f"Push notification failed: {e}")
 
     if not post_ig:
         return "✅ Pridane do appky"
@@ -642,6 +745,10 @@ def _row_to_event(row: dict) -> dict:
         "photo_url": row.get("photo_url") or "",
         "source_url": row.get("source_url") or "",
         "source": row.get("source") or "",
+        "lat": row.get("lat"),
+        "lng": row.get("lng"),
+        "is_recurring": row.get("is_recurring", False),
+        "recurring_end_date": row.get("recurring_end_date") or None,
     }
 
 

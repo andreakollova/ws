@@ -7,9 +7,10 @@ Respects polite crawl delay.
 
 import json
 import logging
+import random
 import re
 import time
-from datetime import datetime
+from datetime import datetime, date as _date
 from urllib.parse import urljoin
 
 import requests
@@ -34,6 +35,21 @@ CRAWL_DELAY = 0.8
 # Eventland event URL: /{locale?}/{city}/event/{id}/{slug}/
 EVENT_URL_RE = re.compile(
     r"^https?://eventland\.eu/(?:[a-z]{2}/)?[^/]+/event/\d+/[^/]+/?$", re.I
+)
+
+# Custom photo pool for "Tanec pri fontáne" recurring event.
+# Run upload_tanec_photos.py to populate Supabase Storage, then paste the URLs here.
+TANEC_PHOTO_URLS: list[str] = [
+    # Paste URLs here after running upload_tanec_photos.py
+]
+
+# Title keywords that identify the Tanec pri fontáne event (case-insensitive)
+TANEC_TITLE_RE = re.compile(r'tanec.{0,10}font', re.I)
+
+# Recurring event detection — matches "Every Wednesday", "Každú stredu", etc.
+RECURRING_RE = re.compile(
+    r'\b(every|weekly|každ[uúéý]|každom|každé|wöchentlich|jeweils|pravidelne|týždenne|opakujúce)\b',
+    re.I,
 )
 
 # City slug → display name
@@ -103,8 +119,10 @@ def scrape_eventland(existing_urls: set) -> list[dict]:
                 logger.debug(f"Not free (price={event.get('price_raw')}): {event['title'][:40]}")
                 continue
 
-            if _is_past(event.get("date", "")):
-                logger.debug(f"Skip past event ({event['date']}): {event['title'][:40]}")
+            # For recurring events use end date for the past-check; never skip if no date
+            check_date = (event.get("recurring_end_date") or event.get("date", "")) if event.get("is_recurring") else event.get("date", "")
+            if check_date and _is_past(check_date):
+                logger.debug(f"Skip past event ({check_date}): {event['title'][:40]}")
                 continue
 
             logger.info(f"Free event found: {event['title'][:60]}")
@@ -184,11 +202,43 @@ def _scrape_event_detail(url: str, listing_image: str = "") -> dict | None:
     # --- Date + Time ---
     start_date = ""
     time_start = ""
+    is_recurring = False
+    recurring_end_date = ""
+
     if jsonld and jsonld.get("startDate"):
         start_date = _parse_iso_date(jsonld["startDate"])
         time_start = _parse_iso_time(jsonld["startDate"])
-    if not start_date and data_ul and items:
-        start_date = _parse_sk_date(items[0])
+
+    # endDate in JSON-LD means the event repeats or spans a range
+    if jsonld and jsonld.get("endDate"):
+        end_iso = _parse_iso_date(jsonld["endDate"])
+        if end_iso and end_iso != start_date:
+            recurring_end_date = end_iso
+            try:
+                if start_date and (_date.fromisoformat(end_iso) - _date.fromisoformat(start_date)).days > 14:
+                    is_recurring = True
+            except Exception:
+                pass
+
+    if data_ul and items:
+        date_item = items[0]
+        if RECURRING_RE.search(date_item):
+            is_recurring = True
+        elif " - " in date_item:
+            # "27.05.2026 - 23.09.2026" style range
+            sd, ed = _parse_date_range(date_item)
+            if not start_date and sd:
+                start_date = sd
+            if ed and not recurring_end_date:
+                recurring_end_date = ed
+            if sd and ed:
+                try:
+                    if (_date.fromisoformat(ed) - _date.fromisoformat(sd)).days > 14:
+                        is_recurring = True
+                except Exception:
+                    pass
+        elif not start_date:
+            start_date = _parse_sk_date(date_item)
 
     # --- Description (full text from div.item-listing--description) ---
     description = ""
@@ -238,6 +288,10 @@ def _scrape_event_detail(url: str, listing_image: str = "") -> dict | None:
         elif isinstance(addr_obj, str):
             address = addr_obj
 
+    # Override photo for Tanec pri fontáne with custom pool
+    if TANEC_PHOTO_URLS and TANEC_TITLE_RE.search(title):
+        image = random.choice(TANEC_PHOTO_URLS)
+
     return {
         "source_url": url,
         "source": "eventland",
@@ -253,6 +307,8 @@ def _scrape_event_detail(url: str, listing_image: str = "") -> dict | None:
         "photo_url": image,
         "min_price": 0.0 if not price_raw or "€" not in price_raw else 999.0,
         "price_raw": price_raw,
+        "is_recurring": is_recurring,
+        "recurring_end_date": recurring_end_date or None,
     }
 
 
@@ -291,6 +347,14 @@ def _parse_iso_time(date_str: str) -> str:
         return ""
     except Exception:
         return ""
+
+
+def _parse_date_range(date_str: str) -> tuple[str, str]:
+    """'27.05.2026 - 23.09.2026' → ('2026-05-27', '2026-09-23')"""
+    parts = date_str.split(" - ", 1)
+    start = _parse_sk_date(parts[0].strip())
+    end = _parse_sk_date(parts[1].strip()) if len(parts) > 1 else ""
+    return start, end
 
 
 def _parse_sk_date(date_str: str) -> str:
