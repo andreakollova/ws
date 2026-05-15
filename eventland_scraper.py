@@ -195,11 +195,15 @@ def _scrape_event_detail(url: str) -> dict | None:
         description = jsonld["description"].strip()[:1000]
 
     # --- Image ---
-    # og:image is event-specific; JSON-LD image is often a generic category placeholder
     og = soup.find("meta", property="og:image")
     image = og.get("content", "").strip() if og else ""
     if not image and jsonld and jsonld.get("image"):
         image = jsonld["image"] if isinstance(jsonld["image"], str) else (jsonld["image"] or [None])[0] or ""
+    if not image:
+        # Fallback: first img inside item-listing--image link or any featured image
+        img_el = soup.select_one("a.item-listing--image img, .item-listing--image img, img.img-fluid")
+        if img_el:
+            image = img_el.get("src") or img_el.get("data-src") or ""
 
     # --- Venue / Address / City ---
     venue = ""
@@ -311,9 +315,16 @@ def _country_from_url(url: str) -> str:
 
 
 def _is_free(event: dict) -> bool:
-    """Free if price_raw has no euro sign (listing is already /zadarmo/ but verify)."""
-    price_raw = event.get("price_raw", "")
-    return "€" not in price_raw
+    """Free if price_raw contains no paid amount in any currency."""
+    price_raw = (event.get("price_raw") or "").strip()
+    if not price_raw:
+        return True
+    # Reject if there's a non-zero numeric amount followed by any currency
+    if re.search(r'\b[1-9]\d*\s*(czk|kč|€|eur|£|gbp|huf|pln)', price_raw, re.I):
+        return False
+    if "€" in price_raw or "£" in price_raw:
+        return False
+    return True
 
 
 def _is_past(date_str: str) -> bool:

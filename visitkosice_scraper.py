@@ -140,9 +140,14 @@ def scrape_page(page: int) -> list[dict]:
         if not is_free(vstupne):
             continue
 
-        # Image
-        img_el = card.find("img", class_="card-image")
-        image_url = parse_image_url(img_el["src"]) if img_el else None
+        # Image — try multiple selectors
+        img_el = (
+            card.find("img", class_="card-image")
+            or card.find("img", class_="detail-img")
+            or card.find("img", class_="img-fluid")
+            or card.find("img")
+        )
+        image_url = parse_image_url(img_el.get("src") or img_el.get("data-src") or "") if img_el else None
 
         # Source URL (link wrapping the card)
         link_el = card.find_parent("a") or card.find("a", href=re.compile(r"/podujatia/"))
