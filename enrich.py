@@ -84,7 +84,16 @@ def enrich_event(event: dict) -> dict:
     description = ""
     tag = "zaujimave"
     city = event.get("city", "")
-    language = CITY_LANGUAGE.get(city, "Slovak")
+    country = event.get("country", "SK")
+    # Country overrides city-based language
+    if country == "AT":
+        language = "English"
+    elif country == "GB":
+        language = "English"
+    elif country == "CZ":
+        language = "Czech"
+    else:
+        language = CITY_LANGUAGE.get(city, "Slovak")
 
     if api_key:
         try:
