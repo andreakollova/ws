@@ -487,13 +487,18 @@ class EventReviewCog(commands.Cog):
             self._last_no_events_notice = None
             for row in rows:
                 sid = str(row["id"])
+                logger.info(f"Picks: processing '{row.get('title')}' id={sid[:8]}")
                 if await is_processed(sid):
+                    logger.info(f"Picks: already processed {sid[:8]}, skipping")
                     db.table("scraped_events").update({"discord_sent": True}).eq("id", row["id"]).execute()
                     continue
                 event = _row_to_event(row)
-                await self._send_event(channel, event)
-                db.table("scraped_events").update({"discord_sent": True}).eq("id", row["id"]).execute()
-                logger.info(f"Picks: sent '{row['title']}' to Discord")
+                try:
+                    await self._send_event(channel, event)
+                    db.table("scraped_events").update({"discord_sent": True}).eq("id", row["id"]).execute()
+                    logger.info(f"Picks: sent '{row['title']}' to Discord OK")
+                except Exception as send_err:
+                    logger.error(f"Picks: SEND FAILED for '{row['title']}': {send_err}", exc_info=True)
                 await asyncio.sleep(0.5)
         except Exception as e:
             logger.error(f"Picks poll error: {e}", exc_info=True)
