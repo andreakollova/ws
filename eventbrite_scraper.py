@@ -33,7 +33,7 @@ HEADERS = {
 }
 
 # Eventbrite event URL: /e/{slug}-{id}/
-EVENT_URL_RE = re.compile(r"^https?://(?:www\.)?eventbrite\.(?:com|co\.uk)/e/[^/?#]+-\d+/?$", re.I)
+EVENT_URL_RE = re.compile(r"^https?://(?:www\.)?eventbrite\.(?:com|co\.uk|at|de|fr|es|it|nl|be)/e/[^/?#]+-\d+/?$", re.I)
 
 
 def scrape_eventbrite(existing_urls: set) -> list[dict]:
