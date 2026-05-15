@@ -24,7 +24,6 @@ from datetime import datetime
 
 from supabase import create_client
 
-from tootoot_scraper import scrape_tootoot
 from eventland_scraper import scrape_eventland
 from petrzalka_scraper import scrape_petrzalka
 from visitkosice_scraper import scrape_visitkosice
@@ -62,14 +61,6 @@ def main():
     logger.info(f"Known events in DB: {len(existing_urls)}")
 
     raw_events: list[dict] = []
-
-    # Tootoot
-    try:
-        tootoot_events = scrape_tootoot(existing_urls)
-        logger.info(f"Tootoot: {len(tootoot_events)} new free events")
-        raw_events.extend(tootoot_events)
-    except Exception as e:
-        logger.error(f"Tootoot scraper failed: {e}", exc_info=True)
 
     # Eventland
     try:
