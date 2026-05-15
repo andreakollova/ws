@@ -466,11 +466,6 @@ class EventReviewCog(commands.Cog):
             new_events = select_res.data or []
             logger.info(f"Poll: found {len(new_events)} unclaimed events")
 
-            if new_events:
-                # Mark them as claimed
-                ids = [row["id"] for row in new_events]
-                db.table("scraped_events").update({"discord_sent": True}).in_("id", ids).execute()
-
             channel = self.bot.get_channel(DISCORD_CHANNEL_ID)
             if not channel:
                 logger.error(f"Channel {DISCORD_CHANNEL_ID} not found")
@@ -480,17 +475,22 @@ class EventReviewCog(commands.Cog):
                 await self._maybe_send_no_events_notice(channel)
                 return
 
-            logger.info(f"Claimed {len(new_events)} new events for Discord")
             self._last_event_sent = datetime.now(timezone.utc)
-            self._last_no_events_notice = None  # reset so notice fires again after a dry spell
+            self._last_no_events_notice = None
 
             for row in new_events:
                 sid = str(row["id"])
                 if await is_processed(sid):
+                    # Already sent — just mark claimed so it leaves the queue
+                    db.table("scraped_events").update({"discord_sent": True}).eq("id", row["id"]).execute()
                     continue
                 event = _row_to_event(row)
                 await self._send_event(channel, event)
+                # Mark claimed AFTER successful send
+                db.table("scraped_events").update({"discord_sent": True}).eq("id", row["id"]).execute()
                 await asyncio.sleep(0.5)
+
+            logger.info(f"Sent {len(new_events)} events to Discord")
 
         except Exception as e:
             logger.error(f"Poll error: {e}", exc_info=True)
