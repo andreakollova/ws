@@ -35,7 +35,7 @@ CITY_LANGUAGE: dict[str, str] = {
 SYSTEM_PROMPT_TEMPLATE = """\
 You are an assistant for Woeva, a community events app. Your job is to enrich event data.
 
-Given an event, you must return a JSON object with two fields:
+Given an event, you must return a JSON object with three fields:
 
 1. "description": A SHORT, fun, inviting description in {language} language.
    - Start with EXACTLY ONE relevant emoji
@@ -55,8 +55,13 @@ Given an event, you must return a JSON object with two fields:
    - historia  = history tours, heritage sites, historical reenactments
    - zaujimave = anything interesting that doesn't clearly fit above
 
+3. "time_start": Extract event start time from the description text if not already provided.
+   - Format: HH:MM (24-hour), e.g. "18:00", "09:30"
+   - Look for patterns like "18:00", "o 18:00", "18.00 hod", "6pm", "um 18 Uhr"
+   - If no time found anywhere, return ""
+
 Rules:
-- If unsure, use "zaujimave"
+- If unsure about tag, use "zaujimave"
 - Return ONLY valid JSON — no preamble, no explanation
 - "description" must start with a single emoji character followed by a space and {language} text
 """
@@ -69,7 +74,7 @@ Venue: {venue}
 City: {city}
 Date: {date}  Time: {time}
 
-Return JSON: {{"description": "<emoji> <max 29 {language} words>", "tag": "<one_tag>"}}
+Return JSON: {{"description": "<emoji> <max 29 {language} words>", "tag": "<one_tag>", "time_start": "<HH:MM or empty>"}}
 """
 
 
@@ -96,8 +101,10 @@ def enrich_event(event: dict) -> dict:
             tag = result.get("tag", "zaujimave")
             if tag not in VALID_TAGS:
                 tag = "zaujimave"
-            # Safety: truncate if GPT exceeded word limit
             description = _enforce_word_limit(description, max_words=29)
+            # Use GPT-extracted time if scraper didn't find one
+            if not event.get("time_start") and result.get("time_start"):
+                event["time_start"] = result["time_start"]
         except Exception as e:
             logger.warning(f"ChatGPT enrichment failed for '{event.get('title', '')}': {e}")
             description = (event.get("original_description") or "")[:120]
