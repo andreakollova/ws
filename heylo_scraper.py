@@ -160,8 +160,8 @@ def _extract_events_from_obj(obj) -> list[dict]:
 
 
 def _looks_like_event(obj: dict) -> bool:
-    """Heuristic: dict has startTime (int) and name or title."""
-    has_time = isinstance(obj.get("startTime"), (int, float))
+    """Heuristic: dict has a time field (int) and name or title."""
+    has_time = isinstance(obj.get("startTime") or obj.get("timestamp") or obj.get("startDate"), (int, float))
     has_name = bool(obj.get("name") or obj.get("title") or obj.get("eventName"))
     return has_time and has_name
 
@@ -181,15 +181,18 @@ def _parse_event(raw: dict, group: dict) -> dict | None:
     if not title:
         return None
 
-    # Event ID and source URL — correct Heylo event URL format
+    # Event ID and source URL
     event_id = raw.get("id") or raw.get("eventId") or ""
-    if event_id:
+    deep_link = raw.get("deepLink") or ""
+    if deep_link:
+        source_url = f"https://www.heylo.com{deep_link}" if deep_link.startswith("/") else deep_link
+    elif event_id:
         source_url = f"https://www.heylo.com/event/{event_id}?redirect=0&context=group-page"
     else:
         source_url = f"https://www.heylo.com/g/{group['group_id']}"
 
-    # Date + time from startTime (Unix timestamp in ms or s)
-    start_ts = raw.get("startTime") or raw.get("startDate") or 0
+    # Date + time — Heylo uses "timestamp" field (Unix ms)
+    start_ts = raw.get("startTime") or raw.get("timestamp") or raw.get("startDate") or 0
     date_str = ""
     time_str = ""
     if start_ts:
@@ -255,7 +258,7 @@ def _parse_event(raw: dict, group: dict) -> dict | None:
 
 
 def _fetch_event_detail(event_id: str) -> dict | None:
-    """Fetch individual Heylo event page and extract image/description."""
+    """Fetch individual Heylo event page and extract image/description/venue."""
     url = f"https://www.heylo.com/event/{event_id}?redirect=0&context=group-page"
     time.sleep(CRAWL_DELAY)
     r = _fetch(url)
@@ -263,28 +266,32 @@ def _fetch_event_detail(event_id: str) -> dict | None:
         return None
     soup = BeautifulSoup(r.text, "html.parser")
 
-    # Try __NEXT_DATA__ first
     next_data = _extract_next_data(soup)
     if next_data:
-        # Walk to find event detail object
-        event_obj = _find_event_by_id(next_data, event_id)
-        if event_obj:
-            image_url = (
-                event_obj.get("imageUrl") or event_obj.get("coverUrl") or
-                event_obj.get("coverImageUrl") or event_obj.get("photo") or None
-            )
-            description = (event_obj.get("description") or event_obj.get("body") or "").strip()[:1000]
-            venue_raw = event_obj.get("locationName") or event_obj.get("location") or ""
-            if isinstance(venue_raw, dict):
-                venue_raw = venue_raw.get("name") or ""
-            return {"image_url": image_url, "description": description, "venue": str(venue_raw).strip()}
+        # Event detail is at queries[*].state.data.event
+        queries = (
+            next_data.get("props", {})
+            .get("pageProps", {})
+            .get("dehydratedState", {})
+            .get("queries", [])
+        )
+        for q in queries:
+            ev = q.get("state", {}).get("data", {}).get("event")
+            if isinstance(ev, dict) and (ev.get("eventId") == event_id or ev.get("id") == event_id):
+                image_url = ev.get("image") or ev.get("imageUrl") or None
+                description = (ev.get("notes") or ev.get("description") or ev.get("body") or "").strip()[:1000]
+                loc_data = ev.get("locationData") or {}
+                venue = (loc_data.get("label") or ev.get("location") or "").strip()
+                return {"image_url": image_url, "description": description, "venue": venue}
 
-    # Fallback: og:image + og:description
+    # Fallback: og tags
     og_image = soup.find("meta", property="og:image")
     og_desc = soup.find("meta", property="og:description")
-    image_url = og_image.get("content", "").strip() if og_image else None
-    description = og_desc.get("content", "").strip()[:1000] if og_desc else ""
-    return {"image_url": image_url, "description": description, "venue": ""}
+    return {
+        "image_url": og_image.get("content", "").strip() if og_image else None,
+        "description": og_desc.get("content", "").strip()[:1000] if og_desc else "",
+        "venue": "",
+    }
 
 
 def _find_event_by_id(data: dict, event_id: str) -> dict | None:
