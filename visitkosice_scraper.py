@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://visitkosice.org"
 LISTING_URL = "https://visitkosice.org/podujatia/kategorie/aktualne-podujatia"
-MAX_PAGES = 5   # max 50 events per run, enough for new ones
+MAX_PAGES = 10   # up to ~100 events per run
 CRAWL_DELAY = 0.8
 
 HEADERS = {

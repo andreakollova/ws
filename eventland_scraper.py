@@ -28,8 +28,8 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "sk-SK,sk;q=0.9,en;q=0.5",
 }
-MAX_EVENTS = 30
-MAX_CHECKS_PER_LISTING = 15   # stop after checking this many unknown URLs per listing page
+MAX_EVENTS = 60
+MAX_CHECKS_PER_LISTING = 25   # stop after checking this many unknown URLs per listing page
 CRAWL_DELAY = 0.8
 
 # Eventland event URL: /{locale?}/{city}/event/{id}/{slug}/
