@@ -68,7 +68,7 @@ CITY_COUNTRY = {
 def scrape_eventland(existing_urls: set) -> list[dict]:
     """Return list of raw free event dicts scraped from Eventland Slovakia."""
     events = []
-    all_event_urls: list[str] = []
+    all_event_entries: list[tuple[str, str]] = []  # (url, listing_image)
 
     for listing_url in LISTING_URLS:
         logger.info(f"Fetching Eventland listing: {listing_url}")
@@ -79,11 +79,11 @@ def scrape_eventland(existing_urls: set) -> list[dict]:
         soup = BeautifulSoup(r.text, "html.parser")
         found = _extract_event_urls(soup)
         logger.info(f"  Found {len(found)} event links")
-        all_event_urls.extend(found)
+        all_event_entries.extend(found)
 
     seen_urls: set[str] = set()
     checks = 0
-    for url in all_event_urls:
+    for url, listing_image in all_event_entries:
         if url in seen_urls:
             continue
         seen_urls.add(url)
@@ -98,7 +98,7 @@ def scrape_eventland(existing_urls: set) -> list[dict]:
         checks += 1
 
         time.sleep(CRAWL_DELAY)
-        event = _scrape_event_detail(url)
+        event = _scrape_event_detail(url, listing_image=listing_image)
         if not event:
             continue
 
@@ -132,9 +132,10 @@ def _fetch(url: str, retries: int = 3) -> requests.Response | None:
     return None
 
 
-def _extract_event_urls(soup: BeautifulSoup) -> list[str]:
+def _extract_event_urls(soup: BeautifulSoup) -> list[tuple[str, str]]:
+    """Return list of (event_url, listing_image_url) tuples."""
     seen: set[str] = set()
-    urls: list[str] = []
+    results: list[tuple[str, str]] = []
     for a in soup.find_all("a", href=True):
         href = a["href"]
         if not href.startswith("http"):
@@ -142,11 +143,18 @@ def _extract_event_urls(soup: BeautifulSoup) -> list[str]:
         href = href.split("?")[0].rstrip("/")
         if EVENT_URL_RE.match(href) and href not in seen:
             seen.add(href)
-            urls.append(href)
-    return urls
+            # Try to grab image from the listing card (inside same <a> or sibling)
+            img = a.find("img")
+            listing_image = ""
+            if img:
+                listing_image = img.get("src") or img.get("data-src") or ""
+                if listing_image and not listing_image.startswith("http"):
+                    listing_image = urljoin(BASE_URL, listing_image)
+            results.append((href, listing_image))
+    return results
 
 
-def _scrape_event_detail(url: str) -> dict | None:
+def _scrape_event_detail(url: str, listing_image: str = "") -> dict | None:
     r = _fetch(url)
     if r is None:
         return None
@@ -203,6 +211,9 @@ def _scrape_event_detail(url: str) -> dict | None:
         img_el = soup.select_one("a.item-listing--image img, .item-listing--image img, img.img-fluid")
         if img_el:
             image = img_el.get("src") or img_el.get("data-src") or ""
+    if not image:
+        # Last resort: use the image captured directly from the listing page
+        image = listing_image
 
     # --- Venue / Address / City ---
     venue = ""
