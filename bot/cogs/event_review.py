@@ -576,9 +576,10 @@ class EventReviewCog(commands.Cog):
         flag = COUNTRY_FLAG.get(country, "🌍")
         lbl = COUNTRY_LABELS.get(country, COUNTRY_LABELS["SK"])
 
+        source_url = event.get("source_url") or ""
         emb = discord.Embed(
             title=(event.get('title') or '')[:256],
-            url=event.get("source_url") or None,
+            url=source_url if source_url.startswith("http") else None,
             color=color,
         )
 
