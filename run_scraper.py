@@ -24,7 +24,6 @@ from datetime import datetime
 
 from supabase import create_client
 
-from goout_scraper import scrape_goout
 from tootoot_scraper import scrape_tootoot
 from eventland_scraper import scrape_eventland
 from petrzalka_scraper import scrape_petrzalka
@@ -64,14 +63,6 @@ def main():
     logger.info(f"Known events in DB: {len(existing_urls)}")
 
     raw_events: list[dict] = []
-
-    # GoOut
-    try:
-        goout_events = scrape_goout(existing_urls)
-        logger.info(f"GoOut: {len(goout_events)} new free events")
-        raw_events.extend(goout_events)
-    except Exception as e:
-        logger.error(f"GoOut scraper failed: {e}", exc_info=True)
 
     # Tootoot
     try:
