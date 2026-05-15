@@ -467,19 +467,21 @@ class EventReviewCog(commands.Cog):
             res = (
                 db.table("scraped_events")
                 .select("id, title, description, tag, date, time_start, duration, venue, address, city, country, photo_url, source_url, source")
-                .or_("discord_sent.is.null,discord_sent.eq.false")
+                .eq("source", "instagram")
                 .eq("approved", False)
                 .eq("rejected", False)
-                .eq("source", "instagram")
+                .neq("discord_sent", True)
                 .order("scraped_at", desc=False)
                 .limit(5)
                 .execute()
             )
             rows = res.data or []
+            logger.info(f"Picks poll: found {len(rows)} instagram events")
             if not rows:
                 return
             channel = self.bot.get_channel(DISCORD_CHANNEL_ID)
             if not channel:
+                logger.error(f"Picks poll: channel {DISCORD_CHANNEL_ID} not found")
                 return
             self._last_event_sent = datetime.now(timezone.utc)
             self._last_no_events_notice = None
@@ -491,6 +493,7 @@ class EventReviewCog(commands.Cog):
                 event = _row_to_event(row)
                 await self._send_event(channel, event)
                 db.table("scraped_events").update({"discord_sent": True}).eq("id", row["id"]).execute()
+                logger.info(f"Picks: sent '{row['title']}' to Discord")
                 await asyncio.sleep(0.5)
         except Exception as e:
             logger.error(f"Picks poll error: {e}", exc_info=True)
