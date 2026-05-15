@@ -378,13 +378,15 @@ class EventReviewCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._lock = asyncio.Lock()
-        # Initialise to now so the no-events notice doesn't fire immediately on startup
+        self._picks_lock = asyncio.Lock()
         self._last_event_sent: datetime = datetime.now(timezone.utc)
         self._last_no_events_notice: Optional[datetime] = None
         self.poll_events.start()
+        self.poll_picks.start()
 
     def cog_unload(self):
         self.poll_events.cancel()
+        self.poll_picks.cancel()
 
     async def cog_load(self):
         """On startup: re-register views AND resend any claimed-but-unsent events."""
@@ -445,26 +447,74 @@ class EventReviewCog(commands.Cog):
         await self.bot.wait_until_ready()
         await asyncio.sleep(15)
 
+    @tasks.loop(seconds=10)
+    async def poll_picks(self):
+        """Fast loop — checks only instagram/picks events every 10 seconds."""
+        async with self._picks_lock:
+            await self._check_picks_events()
+
+    @poll_picks.before_loop
+    async def before_poll_picks(self):
+        await self.bot.wait_until_ready()
+        await asyncio.sleep(10)
+
+    async def _check_picks_events(self):
+        if not SUPABASE_URL or not SUPABASE_KEY:
+            return
+        try:
+            from supabase import create_client
+            db = create_client(SUPABASE_URL, SUPABASE_KEY)
+            res = (
+                db.table("scraped_events")
+                .select("id, title, description, tag, date, time_start, duration, venue, address, city, country, photo_url, source_url, source")
+                .or_("discord_sent.is.null,discord_sent.eq.false")
+                .eq("approved", False)
+                .eq("rejected", False)
+                .eq("source", "instagram")
+                .order("scraped_at", desc=False)
+                .limit(5)
+                .execute()
+            )
+            rows = res.data or []
+            if not rows:
+                return
+            channel = self.bot.get_channel(DISCORD_CHANNEL_ID)
+            if not channel:
+                return
+            self._last_event_sent = datetime.now(timezone.utc)
+            self._last_no_events_notice = None
+            for row in rows:
+                sid = str(row["id"])
+                if await is_processed(sid):
+                    db.table("scraped_events").update({"discord_sent": True}).eq("id", row["id"]).execute()
+                    continue
+                event = _row_to_event(row)
+                await self._send_event(channel, event)
+                db.table("scraped_events").update({"discord_sent": True}).eq("id", row["id"]).execute()
+                await asyncio.sleep(0.5)
+        except Exception as e:
+            logger.error(f"Picks poll error: {e}", exc_info=True)
+
     async def _check_new_events(self):
         if not SUPABASE_URL or not SUPABASE_KEY:
             return
         try:
             from supabase import create_client
             db = create_client(SUPABASE_URL, SUPABASE_KEY)
-
             _select = "id, title, description, tag, date, time_start, duration, venue, address, city, country, photo_url, source_url, source"
-            _base = (
+            # Rebuild query separately to avoid supabase-py mutating shared builder
+            new_events = (
                 db.table("scraped_events")
                 .select(_select)
                 .or_("discord_sent.is.null,discord_sent.eq.false")
                 .eq("approved", False)
                 .eq("rejected", False)
-            )
-            # Picks (instagram) events get priority — send them before scraped events
-            priority = _base.eq("source", "instagram").order("scraped_at", desc=False).limit(5).execute()
-            rest = _base.neq("source", "instagram").order("scraped_at", desc=False).limit(15).execute()
-            new_events = (priority.data or []) + (rest.data or [])
-            logger.info(f"Poll: found {len(new_events)} unclaimed events")
+                .neq("source", "instagram")
+                .order("scraped_at", desc=False)
+                .limit(20)
+                .execute()
+            ).data or []
+            logger.info(f"Poll: found {len(new_events)} unclaimed scraped events")
 
             channel = self.bot.get_channel(DISCORD_CHANNEL_ID)
             if not channel:
