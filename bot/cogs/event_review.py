@@ -159,7 +159,7 @@ async def _publish_event(event: dict, post_ig: bool) -> str:
     db = create_client(SUPABASE_URL, SUPABASE_KEY)
 
     event_date = event.get("date") or None
-    event_time = event.get("time_start") or "00:00"
+    event_time = event.get("time_start") or None
     duration_hours = _duration_to_hours(event.get("duration", ""))
 
     venue_full = event.get("venue") or ""
