@@ -452,18 +452,18 @@ class EventReviewCog(commands.Cog):
             from supabase import create_client
             db = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-            # Select unclaimed events — scraper + picks always insert explicit false values
-            select_res = (
+            _select = "id, title, description, tag, date, time_start, duration, venue, address, city, country, photo_url, source_url, source"
+            _base = (
                 db.table("scraped_events")
-                .select("id, title, description, tag, date, time_start, duration, venue, address, city, country, photo_url, source_url, source")
+                .select(_select)
                 .or_("discord_sent.is.null,discord_sent.eq.false")
                 .eq("approved", False)
                 .eq("rejected", False)
-                .order("scraped_at", desc=False)
-                .limit(20)
-                .execute()
             )
-            new_events = select_res.data or []
+            # Picks (instagram) events get priority — send them before scraped events
+            priority = _base.eq("source", "instagram").order("scraped_at", desc=False).limit(5).execute()
+            rest = _base.neq("source", "instagram").order("scraped_at", desc=False).limit(15).execute()
+            new_events = (priority.data or []) + (rest.data or [])
             logger.info(f"Poll: found {len(new_events)} unclaimed events")
 
             channel = self.bot.get_channel(DISCORD_CHANNEL_ID)
