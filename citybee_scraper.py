@@ -64,6 +64,9 @@ def _fetch_ical(session: requests.Session, event_url: str) -> dict:
         location = _ical_field("LOCATION;LANGUAGE=cs") or _ical_field("LOCATION")
         dtstart = _ical_field("DTSTART")
         dtend = _ical_field("DTEND")
+        # Extract venue name from ORGANIZER CN field: ORGANIZER;CN="Kavárna co hledá jméno":MAILTO:...
+        organizer_m = re.search(r'ORGANIZER[^:]*CN="([^"]+)"', text)
+        organizer_name = organizer_m.group(1).strip() if organizer_m else ""
 
         date, time_start = _parse_ical_date(dtstart)
         _, time_end = _parse_ical_date(dtend)
@@ -79,14 +82,9 @@ def _fetch_ical(session: requests.Session, event_url: str) -> dict:
             except Exception:
                 pass
 
-        # Split location into venue + address
-        venue = ""
-        address = location
-        if location:
-            parts = location.split(",", 1)
-            if len(parts) == 2:
-                venue = parts[0].strip()
-                address = parts[1].strip()
+        # Venue = organizer name (e.g. "Kavárna co hledá jméno"), address = full LOCATION
+        venue = organizer_name
+        address = location  # full address like "Stroupežnického 493/10, Praha 5"
 
         return {
             "title": summary,
