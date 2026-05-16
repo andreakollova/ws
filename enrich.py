@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 VALID_TAGS = [
     "coffee", "party", "zapasy", "sport", "umenie",
     "gaming", "conference", "priroda", "historia", "zaujimave",
+    "dancing", "trhy",
 ]
 
 # City → ISO language name used in GPT prompt

@@ -81,6 +81,8 @@ TAG_EMOJI = {
     "priroda": "🌿",
     "historia": "🏛️",
     "zaujimave": "✨",
+    "dancing": "💃",
+    "trhy": "🛒",
 }
 
 TAG_COLOR = {
@@ -94,6 +96,8 @@ TAG_COLOR = {
     "priroda":    discord.Color.from_rgb(50, 160, 50),
     "historia":   discord.Color.from_rgb(120, 80, 20),
     "zaujimave":  discord.Color.from_rgb(200, 255, 0),
+    "dancing":    discord.Color.from_rgb(255, 100, 180),
+    "trhy":       discord.Color.from_rgb(255, 200, 50),
 }
 
 
