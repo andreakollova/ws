@@ -8,8 +8,8 @@ OSCAR_APP_URL = os.environ.get('OSCAR_APP_URL', '').rstrip('/')
 INTERNAL_SECRET = os.environ.get('INTERNAL_SECRET', '')
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
-IG_USER_ID = os.environ.get('IG_USER_ID', '')
-IG_ACCESS_TOKEN = os.environ.get('IG_ACCESS_TOKEN', '')
+IG_USER_ID = os.environ.get('INSTAGRAM_ACCOUNT_ID', '')
+IG_ACCESS_TOKEN = os.environ.get('INSTAGRAM_ACCESS_TOKEN', '')
 
 
 class Oscar(commands.Cog):
