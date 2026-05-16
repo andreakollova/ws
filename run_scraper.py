@@ -30,6 +30,7 @@ from visitkosice_scraper import scrape_visitkosice
 from eventbrite_scraper import scrape_eventbrite
 from heylo_scraper import scrape_heylo
 from kudyznudy_scraper import scrape_kudyznudy
+from citybee_scraper import scrape_citybee
 from enrich import enrich_event
 
 logging.basicConfig(
@@ -103,13 +104,21 @@ def main():
     except Exception as e:
         logger.error(f"Heylo scraper failed: {e}", exc_info=True)
 
-    # Kudyznudy Prague — free events (Playwright)
+    # Kudyznudy Prague — free events (Playwright, optional)
     try:
         kudyznudy_events = scrape_kudyznudy(existing_urls)
         logger.info(f"Kudyznudy Prague: {len(kudyznudy_events)} new events")
         raw_events.extend(kudyznudy_events)
     except Exception as e:
         logger.error(f"Kudyznudy scraper failed: {e}", exc_info=True)
+
+    # CityBee Prague — free events (iCal, no JS needed)
+    try:
+        citybee_events = scrape_citybee(existing_urls)
+        logger.info(f"CityBee Prague: {len(citybee_events)} new events")
+        raw_events.extend(citybee_events)
+    except Exception as e:
+        logger.error(f"CityBee scraper failed: {e}", exc_info=True)
 
     saved = 0
     for event in raw_events:
