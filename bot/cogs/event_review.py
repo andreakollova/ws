@@ -689,9 +689,8 @@ class EventReviewCog(commands.Cog):
     async def _send_event(self, channel: discord.TextChannel, event: dict):
         tag = (event.get("tag") or "zaujimave").split(",")[0].strip()
         emoji = TAG_EMOJI.get(tag, "✨")
-        color = TAG_COLOR.get(tag, discord.Color.from_rgb(200, 255, 0))
-
         country = _resolve_country(event)
+        color = discord.Color.from_rgb(200, 255, 0) if country == "SK" else TAG_COLOR.get(tag, discord.Color.from_rgb(200, 255, 0))
         flag = COUNTRY_FLAG.get(country, "🌍")
         lbl = COUNTRY_LABELS.get(country, COUNTRY_LABELS["SK"])
 
@@ -731,8 +730,10 @@ class EventReviewCog(commands.Cog):
 
         view = EventConfirmView(event)
         self.bot.add_view(view)
+        is_sk = country == "SK"
+        header = "🇸🇰 **SLOVENSKÝ EVENT — čo s ním?**" if is_sk else "**Nový event — čo s ním?**"
         msg = await channel.send(
-            content="**Novy event — co s nim?**",
+            content=header,
             embed=emb,
             view=view,
         )
