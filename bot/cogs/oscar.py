@@ -80,6 +80,21 @@ class Oscar(commands.Cog):
 
             container_id = ig_data['id']
 
+            # Wait for container to be ready
+            import asyncio
+            for _ in range(15):
+                await asyncio.sleep(6)
+                async with session.get(
+                    f'https://graph.facebook.com/v21.0/{container_id}',
+                    params={'fields': 'status_code', 'access_token': IG_ACCESS_TOKEN},
+                ) as res:
+                    sc_data = await res.json()
+                if sc_data.get('status_code') == 'FINISHED':
+                    break
+                if sc_data.get('status_code') == 'ERROR':
+                    await interaction.followup.send('IG container chyba.', ephemeral=True)
+                    return
+
             # Step 2: Publish
             async with session.post(
                 f'https://graph.facebook.com/v21.0/{IG_USER_ID}/media_publish',
