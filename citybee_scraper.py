@@ -1,6 +1,8 @@
-#!/usr/bin/env python3"""
-CityBee.cz Prague free events scraper.
-Uses the /export/ iCal endpoint for structured data — no JS rendering needed.
+#!/usr/bin/env python3
+"""
+CityBee.cz Prague events scraper.
+Scrapes /lifestyle/ and /kultura/ sections using iCal export endpoints.
+Respects robots.txt (verified: only /admin/, /config/ etc. are disallowed).
 """
 
 import logging
@@ -8,30 +10,41 @@ import re
 import time
 from datetime import datetime, timezone
 from urllib.parse import urljoin
+from urllib.robotparser import RobotFileParser
 
 import requests
 from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
-LISTING_URLS = [
-    "https://www.citybee.cz/kultura/",
-    "https://www.citybee.cz/akce-zdarma/",
-]
 BASE_URL = "https://www.citybee.cz"
+LISTING_URLS = [
+    "https://www.citybee.cz/lifestyle/akce/prehled/",
+    "https://www.citybee.cz/kultura/akce/prehled/",
+]
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "User-Agent": "WoevaBot/1.0 (+https://woeva.app)",
     "Accept-Language": "cs-CZ,cs;q=0.9",
     "Accept-Encoding": "gzip, deflate, br",
 }
 MAX_EVENTS = 40
-CRAWL_DELAY = 0.8
+CRAWL_DELAY = 1.5  # be polite
 
 # Match event URLs like /akce/12345-slug/
 EVENT_URL_RE = re.compile(r"^https://www\.citybee\.cz/akce/\d+-[^/]+/?$", re.I)
 
-# Keywords that indicate free admission
-FREE_RE = re.compile(r"\bzdarma\b|\bvstup\s+zdarma\b|\bfree\b|\bvstupné\s+zdarma\b", re.I)
+_robots: RobotFileParser | None = None
+
+def _can_fetch(url: str) -> bool:
+    global _robots
+    if _robots is None:
+        _robots = RobotFileParser()
+        _robots.set_url(f"{BASE_URL}/robots.txt")
+        try:
+            _robots.read()
+        except Exception:
+            return True  # if robots.txt unreachable, allow
+    return _robots.can_fetch(HEADERS["User-Agent"], url)
 
 
 def _parse_ical_date(dtstring: str):
@@ -115,6 +128,10 @@ def scrape_citybee(existing_urls: set) -> list[dict]:
     seen_urls: set[str] = set()
 
     for listing_url in LISTING_URLS:
+        if not _can_fetch(listing_url):
+            logger.warning(f"CityBee: robots.txt disallows {listing_url}, skipping")
+            continue
+
         try:
             res = session.get(listing_url, headers=HEADERS, timeout=15)
             if res.status_code != 200:
@@ -129,8 +146,9 @@ def scrape_citybee(existing_urls: set) -> list[dict]:
                 href = a["href"]
                 if not href.startswith("http"):
                     href = urljoin(BASE_URL, href)
-                # Remove /export/ suffix if present
                 href = re.sub(r"/export/?$", "/", href)
+                if not _can_fetch(href):
+                    continue
                 if EVENT_URL_RE.match(href) and href not in seen_urls and href not in existing_urls:
                     event_urls.append(href)
                     seen_urls.add(href)
@@ -150,8 +168,9 @@ def scrape_citybee(existing_urls: set) -> list[dict]:
                     time.sleep(CRAWL_DELAY * 0.5)
                     continue
 
-                # Get photo from detail page
+                # Get photo and original description from detail page
                 photo_url = ""
+                original_description = data.get("description", "")
                 try:
                     detail_res = session.get(event_url, headers=HEADERS, timeout=10)
                     if detail_res.status_code == 200:
@@ -159,17 +178,16 @@ def scrape_citybee(existing_urls: set) -> list[dict]:
                         og = detail_soup.find("meta", property="og:image")
                         if og:
                             photo_url = og.get("content", "")
-                        # Check if free
-                        page_text = detail_soup.get_text()
-                        if not FREE_RE.search(page_text) and listing_url != "https://www.citybee.cz/akce-zdarma/":
-                            time.sleep(CRAWL_DELAY)
-                            continue
+                        og_desc = detail_soup.find("meta", property="og:description")
+                        if og_desc and og_desc.get("content"):
+                            original_description = og_desc["content"][:500]
                 except Exception:
                     pass
 
                 events.append({
                     "title": data["title"],
-                    "description": data["description"],
+                    "original_description": original_description,
+                    "description": original_description,
                     "date": data["date"],
                     "time_start": data["time_start"] or "",
                     "duration": data["duration"] or 2.0,
