@@ -15,6 +15,28 @@ services:
       - key: OPENAI_API_KEY
         sync: false
 
+  # Cron: Oscar lifestyle post — 09:15 CEST (07:15 UTC)
+  - type: cron
+    name: woeva-oscar-lifestyle
+    runtime: python
+    buildCommand: pip install requests
+    schedule: "15 7 * * *"
+    startCommand: python -c "import requests,os; r=requests.post('https://woeva-oscar.vercel.app/api/cron',headers={'x-password':os.environ['OSCAR_PASSWORD']}); print(r.status_code, r.text[:200])"
+    envVars:
+      - key: OSCAR_PASSWORD
+        sync: false
+
+  # Cron: Oscar animation post — 15:00 CEST (13:00 UTC)
+  - type: cron
+    name: woeva-oscar-animation
+    runtime: python
+    buildCommand: pip install requests
+    schedule: "0 13 * * *"
+    startCommand: python -c "import requests,os; r=requests.post('https://woeva-oscar.vercel.app/api/cron-animation',headers={'x-password':os.environ['OSCAR_PASSWORD']}); print(r.status_code, r.text[:200])"
+    envVars:
+      - key: OSCAR_PASSWORD
+        sync: false
+
   # Worker: Discord bot — polls Supabase, sends events for approval, posts to Instagram
   - type: worker
     name: woeva-bot
