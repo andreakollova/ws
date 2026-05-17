@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://www.citybee.cz"
 LISTING_URLS = [
-    "https://www.citybee.cz/lifestyle/akce/prehled/",
-    "https://www.citybee.cz/kultura/akce/prehled/",
+    "https://www.citybee.cz/akce-zdarma/",
+    "https://www.citybee.cz/akce-na-tento-vikend/",
 ]
 HEADERS = {
     "User-Agent": "WoevaBot/1.0 (+https://woeva.app)",
@@ -41,7 +41,8 @@ def _can_fetch(url: str) -> bool:
         _robots = RobotFileParser()
         _robots.set_url(f"{BASE_URL}/robots.txt")
         try:
-            _robots.read()
+            res = requests.get(f"{BASE_URL}/robots.txt", headers=HEADERS, timeout=10)
+            _robots.parse(res.text.splitlines())
         except Exception:
             return True  # if robots.txt unreachable, allow
     return _robots.can_fetch(HEADERS["User-Agent"], url)

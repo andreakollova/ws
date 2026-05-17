@@ -31,6 +31,7 @@ from eventbrite_scraper import scrape_eventbrite
 from heylo_scraper import scrape_heylo
 from kudyznudy_scraper import scrape_kudyznudy
 from citybee_scraper import scrape_citybee
+from freshmarket_scraper import scrape_freshmarket
 from enrich import enrich_event
 
 logging.basicConfig(
@@ -119,6 +120,14 @@ def main():
         raw_events.extend(citybee_events)
     except Exception as e:
         logger.error(f"CityBee scraper failed: {e}", exc_info=True)
+
+    # FreshMarket Bratislava — farmárska tržnica
+    try:
+        freshmarket_events = scrape_freshmarket(existing_urls)
+        logger.info(f"FreshMarket Bratislava: {len(freshmarket_events)} new events")
+        raw_events.extend(freshmarket_events)
+    except Exception as e:
+        logger.error(f"FreshMarket scraper failed: {e}", exc_info=True)
 
     saved = 0
     for event in raw_events:
