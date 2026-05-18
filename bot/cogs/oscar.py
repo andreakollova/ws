@@ -1,10 +1,15 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
+from datetime import time, timezone
 import os
 import aiohttp
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 OSCAR_APP_URL = os.environ.get('OSCAR_APP_URL', '').rstrip('/')
+OSCAR_PASSWORD = os.environ.get('OSCAR_PASSWORD', '')
 INTERNAL_SECRET = os.environ.get('INTERNAL_SECRET', '')
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
@@ -15,6 +20,34 @@ IG_ACCESS_TOKEN = os.environ.get('INSTAGRAM_ACCESS_TOKEN', '')
 class Oscar(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.oscar_lifestyle_cron.start()
+        self.oscar_animation_cron.start()
+
+    def cog_unload(self):
+        self.oscar_lifestyle_cron.cancel()
+        self.oscar_animation_cron.cancel()
+
+    @tasks.loop(time=time(7, 15, tzinfo=timezone.utc))
+    async def oscar_lifestyle_cron(self):
+        if not OSCAR_APP_URL or not OSCAR_PASSWORD:
+            return
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f'{OSCAR_APP_URL}/api/cron',
+                headers={'x-password': OSCAR_PASSWORD},
+            ) as res:
+                logger.info(f'Oscar lifestyle cron: {res.status}')
+
+    @tasks.loop(time=time(13, 0, tzinfo=timezone.utc))
+    async def oscar_animation_cron(self):
+        if not OSCAR_APP_URL or not OSCAR_PASSWORD:
+            return
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f'{OSCAR_APP_URL}/api/cron-animation',
+                headers={'x-password': OSCAR_PASSWORD},
+            ) as res:
+                logger.info(f'Oscar animation cron: {res.status}')
 
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction):

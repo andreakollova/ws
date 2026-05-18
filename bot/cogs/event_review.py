@@ -174,6 +174,24 @@ async def _add_fake_attendees_staggered(event_id: str, user_ids: list[str]):
             logger.warning(f"Fake attendee insert failed: {e}")
 
 
+async def _geocode(address: str) -> tuple:
+    """Geocode address using Nominatim. Returns (lat, lng) or (None, None)."""
+    if not address:
+        return None, None
+    try:
+        import httpx as _httpx
+        params = {"q": address, "format": "json", "limit": 1}
+        headers = {"User-Agent": "WoevaApp/1.0 (woeva@woeva.app)"}
+        async with _httpx.AsyncClient(timeout=8) as hc:
+            r = await hc.get("https://nominatim.openstreetmap.org/search", params=params, headers=headers)
+            data = r.json()
+            if data:
+                return float(data[0]["lat"]), float(data[0]["lon"])
+    except Exception as e:
+        logger.warning(f"Geocode failed for '{address}': {e}")
+    return None, None
+
+
 async def _publish_event(event: dict, post_ig: bool) -> str:
     """Copy approved event to Woeva events table. Optionally post to Instagram."""
     from supabase import create_client
@@ -187,6 +205,16 @@ async def _publish_event(event: dict, post_ig: bool) -> str:
     if event.get("address"):
         venue_full = f"{venue_full}, {event['address']}".strip(", ")
 
+    # Geocode if lat/lng missing
+    lat = event.get("lat") or None
+    lng = event.get("lng") or None
+    if not lat or not lng:
+        query = venue_full or event.get("city") or ""
+        if query:
+            lat, lng = await _geocode(query)
+            if lat:
+                logger.info(f"Geocoded '{query}' → {lat}, {lng}")
+
     # Insert into Woeva events table
     event_row = {
         "creator_id": BOT_USER_ID,
@@ -198,8 +226,8 @@ async def _publish_event(event: dict, post_ig: bool) -> str:
         "time": event_time,
         "duration": duration_hours,
         "venue": venue_full or None,
-        "lat": event.get("lat") or None,
-        "lng": event.get("lng") or None,
+        "lat": lat,
+        "lng": lng,
         "price": 0,
         "going_count": 0,
         "is_free": True,
@@ -340,6 +368,8 @@ async def _publish_event(event: dict, post_ig: bool) -> str:
 
 # ── Edit modal ───────────────────────────────────────────────────────────────
 
+VALID_TAGS = list(TAG_EMOJI.keys())
+
 class EditEventModal(discord.ui.Modal, title="Upraviť event"):
     def __init__(self, view: "EventConfirmView"):
         super().__init__()
@@ -348,6 +378,11 @@ class EditEventModal(discord.ui.Modal, title="Upraviť event"):
 
         self.f_title = discord.ui.TextInput(
             label="Názov", default=event.get("title", ""), max_length=200, required=True
+        )
+        self.f_tag = discord.ui.TextInput(
+            label=f"Tag ({', '.join(VALID_TAGS)})",
+            default=event.get("tag", "zaujimave"),
+            placeholder="zaujimave", required=False, max_length=50
         )
         self.f_date = discord.ui.TextInput(
             label="Dátum (YYYY-MM-DD)", default=event.get("date", ""),
@@ -361,20 +396,16 @@ class EditEventModal(discord.ui.Modal, title="Upraviť event"):
             label="Miesto", default=event.get("venue", ""),
             placeholder="Názov miesta", required=False, max_length=200
         )
-        self.f_city = discord.ui.TextInput(
-            label="Mesto", default=event.get("city", "Bratislava"),
-            required=False, max_length=100
-        )
-        for field in [self.f_title, self.f_date, self.f_time, self.f_venue, self.f_city]:
+        for field in [self.f_title, self.f_tag, self.f_date, self.f_time, self.f_venue]:
             self.add_item(field)
 
     async def on_submit(self, interaction: discord.Interaction):
         e = self.event_view.event
         e["title"] = self.f_title.value.strip()
+        e["tag"] = self.f_tag.value.strip() or "zaujimave"
         e["date"] = self.f_date.value.strip()
         e["time_start"] = self.f_time.value.strip()
         e["venue"] = self.f_venue.value.strip()
-        e["city"] = self.f_city.value.strip()
 
         # Update embed to reflect changes
         if interaction.message and interaction.message.embeds:
@@ -507,7 +538,7 @@ class EventReviewCog(commands.Cog):
         self.poll_picks.cancel()
 
     async def cog_load(self):
-        """On startup: re-register views AND resend any claimed-but-unsent events."""
+        """On startup: re-register persistent views for all pending events."""
         try:
             from supabase import create_client
             db = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -518,42 +549,19 @@ class EventReviewCog(commands.Cog):
                 .eq("approved", False)
                 .eq("rejected", False)
                 .order("scraped_at", desc=True)
-                .limit(100)
+                .limit(200)
                 .execute()
             )
             restored = 0
-            to_resend = []
             for row in result.data or []:
                 event = _row_to_event(row)
                 self.bot.add_view(EventConfirmView(event))
                 restored += 1
-                # If not in local SQLite, this event was claimed but never sent — queue for resend
-                if not await is_processed(str(row["id"])):
-                    to_resend.append(row)
 
             if restored:
-                logger.info(f"Restored {restored} persistent EventConfirmView(s), {len(to_resend)} need resend")
-
-            if to_resend:
-                asyncio.ensure_future(self._resend_stuck_events(to_resend))
+                logger.info(f"Restored {restored} persistent EventConfirmView(s)")
         except Exception as e:
             logger.warning(f"Could not restore views on startup: {e}")
-
-    async def _resend_stuck_events(self, rows: list[dict]):
-        """Resend events that were claimed (discord_sent=True) but never actually sent."""
-        await self.bot.wait_until_ready()
-        await asyncio.sleep(5)
-        channel = self.bot.get_channel(DISCORD_CHANNEL_ID)
-        if not channel:
-            logger.error(f"Resend: channel {DISCORD_CHANNEL_ID} not found")
-            return
-        for row in rows:
-            try:
-                event = _row_to_event(row)
-                await self._send_event(channel, event)
-                await asyncio.sleep(0.5)
-            except Exception as e:
-                logger.error(f"Resend failed for {row['id']}: {e}")
 
     @tasks.loop(seconds=POLL_INTERVAL)
     async def poll_events(self):
