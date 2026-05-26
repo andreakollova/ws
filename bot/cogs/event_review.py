@@ -71,33 +71,46 @@ def _resolve_country(event: dict) -> str:
 
 
 TAG_EMOJI = {
-    "coffee": "☕",
-    "party": "🎉",
-    "zapasy": "🏆",
-    "sport": "🏃",
-    "umenie": "🎨",
-    "gaming": "🎮",
-    "conference": "📋",
-    "priroda": "🌿",
-    "historia": "🏛️",
-    "zaujimave": "✨",
-    "dancing": "💃",
-    "trhy": "🛒",
+    "Movement & Sport":       "🏃",
+    "Wellness & Body":        "🧘",
+    "Food & Drinks":          "🍽️",
+    "Art & Creation":         "🎨",
+    "Music & Nightlife":      "🎵",
+    "Learning & Mind":        "📚",
+    "Community & Belonging":  "🤝",
+    # legacy fallback keys
+    "coffee": "🍽️", "party": "🎵", "zapasy": "🏃", "sport": "🏃",
+    "umenie": "🎨", "gaming": "🎨", "conference": "📚",
+    "priroda": "🏃", "historia": "📚", "zaujimave": "🤝",
+    "dancing": "🎵", "trhy": "🍽️",
 }
 
 TAG_COLOR = {
-    "coffee":     discord.Color.from_rgb(150, 90, 50),
-    "party":      discord.Color.from_rgb(180, 0, 180),
-    "zapasy":     discord.Color.from_rgb(255, 165, 0),
-    "sport":      discord.Color.from_rgb(0, 180, 80),
-    "umenie":     discord.Color.from_rgb(100, 0, 200),
-    "gaming":     discord.Color.from_rgb(0, 100, 255),
-    "conference": discord.Color.from_rgb(0, 120, 180),
-    "priroda":    discord.Color.from_rgb(50, 160, 50),
-    "historia":   discord.Color.from_rgb(120, 80, 20),
-    "zaujimave":  discord.Color.from_rgb(200, 255, 0),
-    "dancing":    discord.Color.from_rgb(255, 100, 180),
-    "trhy":       discord.Color.from_rgb(255, 200, 50),
+    "Movement & Sport":       discord.Color.from_rgb(0, 180, 80),
+    "Wellness & Body":        discord.Color.from_rgb(100, 200, 180),
+    "Food & Drinks":          discord.Color.from_rgb(220, 150, 50),
+    "Art & Creation":         discord.Color.from_rgb(100, 0, 200),
+    "Music & Nightlife":      discord.Color.from_rgb(180, 0, 180),
+    "Learning & Mind":        discord.Color.from_rgb(0, 120, 180),
+    "Community & Belonging":  discord.Color.from_rgb(200, 255, 0),
+}
+
+# Map legacy scraped tag values to new category names
+OLD_TAG_TO_CATEGORY = {
+    "sport": "Movement & Sport", "running": "Movement & Sport",
+    "zapasy": "Movement & Sport", "priroda": "Movement & Sport",
+    "dancing": "Movement & Sport", "tanec": "Movement & Sport",
+    "yoga": "Wellness & Body", "joga": "Wellness & Body",
+    "coffee": "Food & Drinks", "food": "Food & Drinks",
+    "gastro": "Food & Drinks", "jedlo": "Food & Drinks",
+    "trhy": "Food & Drinks", "markets": "Food & Drinks",
+    "umenie": "Art & Creation", "art": "Art & Creation",
+    "film": "Art & Creation", "gaming": "Art & Creation",
+    "music": "Music & Nightlife", "hudba": "Music & Nightlife",
+    "party": "Music & Nightlife",
+    "tech": "Learning & Mind", "networking": "Learning & Mind",
+    "conference": "Learning & Mind", "historia": "Learning & Mind",
+    "zaujimave": "Community & Belonging",
 }
 
 
@@ -220,7 +233,7 @@ async def _publish_event(event: dict, post_ig: bool) -> str:
         "creator_id": BOT_USER_ID,
         "title": event.get("title", ""),
         "tagline": event.get("description", ""),
-        "category": event.get("tag", "zaujimave"),
+        "category": OLD_TAG_TO_CATEGORY.get(event.get("tag", ""), event.get("tag", "Community & Belonging")),
         "cover_url": event.get("photo_url") or None,
         "date": event_date,
         "time": event_time,
@@ -235,6 +248,7 @@ async def _publish_event(event: dict, post_ig: bool) -> str:
         "country": _resolve_country(event),
         "is_recurring": event.get("is_recurring", False),
         "recurring_end_date": event.get("recurring_end_date") or None,
+        "source": event.get("source") or "scraped",
     }
 
     # Use service role (bypasses RLS) via the provided SUPABASE_KEY
@@ -380,9 +394,9 @@ class EditEventModal(discord.ui.Modal, title="Upraviť event"):
             label="Názov", default=event.get("title", ""), max_length=200, required=True
         )
         self.f_tag = discord.ui.TextInput(
-            label=f"Tag ({', '.join(VALID_TAGS)})",
-            default=event.get("tag", "zaujimave"),
-            placeholder="zaujimave", required=False, max_length=50
+            label="Kategória",
+            default=OLD_TAG_TO_CATEGORY.get(event.get("tag", ""), event.get("tag", "Community & Belonging")),
+            placeholder="Movement & Sport", required=False, max_length=60
         )
         self.f_date = discord.ui.TextInput(
             label="Dátum (YYYY-MM-DD)", default=event.get("date", ""),
@@ -402,7 +416,7 @@ class EditEventModal(discord.ui.Modal, title="Upraviť event"):
     async def on_submit(self, interaction: discord.Interaction):
         e = self.event_view.event
         e["title"] = self.f_title.value.strip()
-        e["tag"] = self.f_tag.value.strip() or "zaujimave"
+        e["tag"] = self.f_tag.value.strip() or "Community & Belonging"
         e["date"] = self.f_date.value.strip()
         e["time_start"] = self.f_time.value.strip()
         e["venue"] = self.f_venue.value.strip()
