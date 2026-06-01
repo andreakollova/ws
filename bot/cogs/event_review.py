@@ -589,7 +589,7 @@ class EventReviewCog(commands.Cog):
 
     @tasks.loop(seconds=10)
     async def poll_picks(self):
-        """Fast loop — checks only instagram/picks events every 10 seconds."""
+        """Fast loop — checks only woeva_picks events every 10 seconds."""
         async with self._picks_lock:
             await self._check_picks_events()
 
@@ -607,7 +607,7 @@ class EventReviewCog(commands.Cog):
             res = (
                 db.table("scraped_events")
                 .select("id, title, description, tag, date, time_start, duration, venue, address, city, country, photo_url, source_url, source")
-                .eq("source", "instagram")
+                .in_("source", ["instagram", "woeva_picks"])
                 .eq("approved", False)
                 .eq("rejected", False)
                 .neq("discord_sent", True)
@@ -616,7 +616,7 @@ class EventReviewCog(commands.Cog):
                 .execute()
             )
             rows = res.data or []
-            logger.info(f"Picks poll: found {len(rows)} instagram events")
+            logger.info(f"Picks poll: found {len(rows)} picks events")
             if not rows:
                 return
             channel = self.bot.get_channel(DISCORD_CHANNEL_ID)
@@ -658,6 +658,7 @@ class EventReviewCog(commands.Cog):
                 .eq("approved", False)
                 .eq("rejected", False)
                 .neq("source", "instagram")
+                .neq("source", "woeva_picks")
                 .order("scraped_at", desc=False)
                 .limit(20)
                 .execute()
