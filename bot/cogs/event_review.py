@@ -34,22 +34,27 @@ COUNTRY_LABELS: dict[str, dict[str, str]] = {
     "SK": {
         "date": "Dátum", "duration": "Trvanie", "venue": "Miesto",
         "address": "Adresa", "city": "Mesto", "free": "Vstup: Zadarmo",
+        "price": "Vstup", "pay_at_door": "Platba na mieste",
     },
     "AT": {
         "date": "Datum", "duration": "Dauer", "venue": "Ort",
         "address": "Adresse", "city": "Stadt", "free": "Eintritt frei",
+        "price": "Eintritt", "pay_at_door": "Zahlung vor Ort",
     },
     "CZ": {
         "date": "Datum", "duration": "Trvání", "venue": "Místo",
         "address": "Adresa", "city": "Město", "free": "Vstup zdarma",
+        "price": "Vstup", "pay_at_door": "Platba na místě",
     },
     "GB": {
         "date": "Date", "duration": "Duration", "venue": "Venue",
         "address": "Address", "city": "City", "free": "Free Entry",
+        "price": "Entry", "pay_at_door": "Pay at door",
     },
     "DE": {
         "date": "Datum", "duration": "Dauer", "venue": "Ort",
         "address": "Adresse", "city": "Stadt", "free": "Eintritt frei",
+        "price": "Eintritt", "pay_at_door": "Zahlung vor Ort",
     },
 }
 
@@ -229,6 +234,10 @@ async def _publish_event(event: dict, post_ig: bool) -> str:
                 logger.info(f"Geocoded '{query}' → {lat}, {lng}")
 
     # Insert into Woeva events table
+    price = float(event.get("price") or 0)
+    pay_at_door = bool(event.get("pay_at_door", False))
+    is_free = price == 0 and not pay_at_door
+
     event_row = {
         "creator_id": BOT_USER_ID,
         "title": event.get("title", ""),
@@ -241,9 +250,10 @@ async def _publish_event(event: dict, post_ig: bool) -> str:
         "venue": venue_full or None,
         "lat": lat,
         "lng": lng,
-        "price": 0,
+        "price": price,
         "going_count": 0,
-        "is_free": True,
+        "is_free": is_free,
+        "pay_at_door": pay_at_door,
         "city": event.get("city") or "Slovensko",
         "country": _resolve_country(event),
         "is_recurring": event.get("is_recurring", False),
@@ -406,11 +416,16 @@ class EditEventModal(discord.ui.Modal, title="Upraviť event"):
             label="Čas (HH:MM)", default=event.get("time_start", ""),
             placeholder="18:00", required=False, max_length=5
         )
-        self.f_venue = discord.ui.TextInput(
-            label="Miesto", default=event.get("venue", ""),
-            placeholder="Názov miesta", required=False, max_length=200
+        price_default = str(int(event.get("price") or 0)) if event.get("price") else ""
+        if event.get("pay_at_door") and price_default:
+            price_default = f"{price_default} pad"
+        self.f_price = discord.ui.TextInput(
+            label="Cena € (napr. '5' alebo '5 pad' = na mieste)",
+            default=price_default,
+            placeholder="prázdne = zadarmo | 5 = 5€ | 5 pad = 5€ na mieste",
+            required=False, max_length=20
         )
-        for field in [self.f_title, self.f_tag, self.f_date, self.f_time, self.f_venue]:
+        for field in [self.f_title, self.f_tag, self.f_date, self.f_time, self.f_price]:
             self.add_item(field)
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -419,7 +434,16 @@ class EditEventModal(discord.ui.Modal, title="Upraviť event"):
         e["tag"] = self.f_tag.value.strip() or "Community & Belonging"
         e["date"] = self.f_date.value.strip()
         e["time_start"] = self.f_time.value.strip()
-        e["venue"] = self.f_venue.value.strip()
+
+        # Parse price field: "5 pad" → price=5, pay_at_door=True; "5" → price=5; "0"/"" → free
+        raw_price = self.f_price.value.strip().lower()
+        pay_at_door = "pad" in raw_price
+        price_str = raw_price.replace("pad", "").strip()
+        try:
+            e["price"] = float(price_str) if price_str else 0.0
+        except ValueError:
+            e["price"] = 0.0
+        e["pay_at_door"] = pay_at_door
 
         # Update embed to reflect changes
         if interaction.message and interaction.message.embeds:
@@ -442,7 +466,14 @@ class EditEventModal(discord.ui.Modal, title="Upraviť event"):
                 desc_lines.append(f"**{lbl['venue']}:** {e['venue']}")
             if e.get("city"):
                 desc_lines.append(f"**{lbl['city']}:** {e['city']}")
-            desc_lines.append(f"\n**{lbl['free']}**")
+            price = e.get("price") or 0
+            pay_at_door = e.get("pay_at_door", False)
+            if pay_at_door and price:
+                desc_lines.append(f"\n**{lbl['pay_at_door']}:** {price:.0f}€")
+            elif price:
+                desc_lines.append(f"\n**{lbl['price']}:** {price:.0f}€")
+            else:
+                desc_lines.append(f"\n**{lbl['free']}**")
 
             emb = old.copy()
             emb.title = e['title'][:256]
@@ -558,7 +589,7 @@ class EventReviewCog(commands.Cog):
             db = create_client(SUPABASE_URL, SUPABASE_KEY)
             result = (
                 db.table("scraped_events")
-                .select("id, title, description, tag, date, time_start, duration, venue, address, city, country, photo_url, source_url, source")
+                .select("id, title, description, tag, date, time_start, duration, venue, address, city, country, photo_url, source_url, source, price, pay_at_door")
                 .eq("discord_sent", True)
                 .eq("approved", False)
                 .eq("rejected", False)
@@ -606,7 +637,7 @@ class EventReviewCog(commands.Cog):
             db = create_client(SUPABASE_URL, SUPABASE_KEY)
             res = (
                 db.table("scraped_events")
-                .select("id, title, description, tag, date, time_start, duration, venue, address, city, country, photo_url, source_url, source")
+                .select("id, title, description, tag, date, time_start, duration, venue, address, city, country, photo_url, source_url, source, price, pay_at_door")
                 .in_("source", ["instagram", "woeva_picks"])
                 .eq("approved", False)
                 .eq("rejected", False)
@@ -649,7 +680,7 @@ class EventReviewCog(commands.Cog):
         try:
             from supabase import create_client
             db = create_client(SUPABASE_URL, SUPABASE_KEY)
-            _select = "id, title, description, tag, date, time_start, duration, venue, address, city, country, photo_url, source_url, source"
+            _select = "id, title, description, tag, date, time_start, duration, venue, address, city, country, photo_url, source_url, source, price, pay_at_door"
             # Rebuild query separately to avoid supabase-py mutating shared builder
             new_events = (
                 db.table("scraped_events")
@@ -744,7 +775,14 @@ class EventReviewCog(commands.Cog):
             desc_lines.append(f"**{lbl['address']}:** {event['address']}")
         if event.get("city"):
             desc_lines.append(f"**{lbl['city']}:** {event['city']}")
-        desc_lines.append(f"\n**{lbl['free']}**")
+        price = event.get("price") or 0
+        pay_at_door = event.get("pay_at_door", False)
+        if pay_at_door and price:
+            desc_lines.append(f"\n**{lbl['pay_at_door']}:** {float(price):.0f}€")
+        elif price:
+            desc_lines.append(f"\n**{lbl['price']}:** {float(price):.0f}€")
+        else:
+            desc_lines.append(f"\n**{lbl['free']}**")
 
         emb.description = "\n".join(desc_lines)
         emb.add_field(name="Tag", value=tag, inline=True)
@@ -788,6 +826,8 @@ def _row_to_event(row: dict) -> dict:
         "lng": row.get("lng"),
         "is_recurring": row.get("is_recurring", False),
         "recurring_end_date": row.get("recurring_end_date") or None,
+        "price": row.get("price") or 0,
+        "pay_at_door": bool(row.get("pay_at_door", False)),
     }
 
 
