@@ -831,7 +831,7 @@ def _row_to_event(row: dict) -> dict:
         "is_recurring": row.get("is_recurring", False),
         "recurring_end_date": row.get("recurring_end_date") or None,
         "price": row.get("price") or 0,
-        "pay_at_door": bool(row.get("pay_at_door", False)),
+        "pay_at_door": bool(row.get("pay_at_door") or (float(row.get("price") or 0) > 0 and row.get("source") == "woeva_picks")),
     }
 
 
