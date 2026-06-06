@@ -234,7 +234,11 @@ async def _publish_event(event: dict, post_ig: bool) -> str:
                 logger.info(f"Geocoded '{query}' → {lat}, {lng}")
 
     # Insert into Woeva events table
-    price = float(event.get("price") or 0)
+    raw_price = event.get("price") or 0
+    try:
+        price = float(raw_price) if str(raw_price).replace('.', '', 1).isdigit() else 0.0
+    except (ValueError, TypeError):
+        price = 0.0
     pay_at_door = bool(event.get("pay_at_door", False))
     is_free = price == 0 and not pay_at_door
 
