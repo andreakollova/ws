@@ -816,6 +816,13 @@ class EventReviewCog(commands.Cog):
         logger.info(f"Sent event {event['supabase_id'][:8]} to Discord msg {msg.id}")
 
 
+def _safe_float(val) -> float:
+    try:
+        return float(val or 0)
+    except (ValueError, TypeError):
+        return 0.0
+
+
 def _row_to_event(row: dict) -> dict:
     return {
         "supabase_id": str(row["id"]),
@@ -837,7 +844,7 @@ def _row_to_event(row: dict) -> dict:
         "is_recurring": row.get("is_recurring", False),
         "recurring_end_date": row.get("recurring_end_date") or None,
         "price": row.get("price") or 0,
-        "pay_at_door": bool(row.get("pay_at_door") or (float(row.get("price") or 0) > 0 and row.get("source") == "woeva_picks")),
+        "pay_at_door": bool(row.get("pay_at_door") or (_safe_float(row.get("price")) > 0 and row.get("source") == "woeva_picks")),
     }
 
 
