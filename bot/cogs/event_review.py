@@ -806,6 +806,8 @@ class EventReviewCog(commands.Cog):
         emb.add_field(name="Tag", value=tag, inline=True)
         emb.add_field(name="Zdroj", value=(event.get("source") or "").upper(), inline=True)
         emb.add_field(name="Krajina", value=f"{flag} {country}", inline=True)
+        if source_url.startswith("http") and event.get("source") == "nitra":
+            emb.add_field(name="🔗 Link", value=source_url, inline=False)
 
         if event.get("photo_url") and str(event["photo_url"]).startswith("http"):
             emb.set_image(url=event["photo_url"])

@@ -136,8 +136,8 @@ def _scrape_event_detail(url: str) -> dict | None:
     soup = BeautifulSoup(r.text, "html.parser")
     main = soup.find("main") or soup
 
-    # Title
-    h1 = main.find("h1")
+    # Title — h1 is outside <main> on nitra.eu
+    h1 = soup.find("h1")
     title = h1.get_text(strip=True) if h1 else ""
     if not title:
         return None
@@ -168,11 +168,11 @@ def _scrape_event_detail(url: str) -> dict | None:
     check_text = full_text + " " + description
     is_free = _detect_free(check_text)
 
-    # Image — look for media.moderneobce.sk/data/calendar
+    # Image — look for event-specific calendar images
     image = ""
     for img in soup.find_all("img"):
         src = img.get("src") or img.get("data-src") or ""
-        if "media.moderneobce.sk/data/calendar" in src or "nitra.eu" in src:
+        if "media.moderneobce.sk/data/calendar" in src:
             if not src.startswith("http"):
                 src = urljoin(BASE_URL, src)
             image = src
