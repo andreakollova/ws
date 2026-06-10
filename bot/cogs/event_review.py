@@ -785,12 +785,12 @@ class EventReviewCog(commands.Cog):
             desc_lines.append(f"**{lbl['address']}:** {event['address']}")
         if event.get("city"):
             desc_lines.append(f"**{lbl['city']}:** {event['city']}")
-        price = event.get("price") or 0
+        price_num = _safe_float(event.get("price"))
         pay_at_door = event.get("pay_at_door", False)
-        if pay_at_door and price:
-            desc_lines.append(f"\n**{lbl['pay_at_door']}:** {float(price):.0f}€")
-        elif price:
-            desc_lines.append(f"\n**{lbl['price']}:** {float(price):.0f}€")
+        if pay_at_door and price_num > 0:
+            desc_lines.append(f"\n**{lbl['pay_at_door']}:** {price_num:.0f}€")
+        elif price_num > 0:
+            desc_lines.append(f"\n**{lbl['price']}:** {price_num:.0f}€")
         else:
             desc_lines.append(f"\n**{lbl['free']}**")
 
