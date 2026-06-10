@@ -593,7 +593,7 @@ class EventReviewCog(commands.Cog):
             db = create_client(SUPABASE_URL, SUPABASE_KEY)
             result = (
                 db.table("scraped_events")
-                .select("id, title, description, tag, date, time_start, duration, venue, address, city, country, photo_url, source_url, source, price, pay_at_door")
+                .select("id, title, description, tag, date, time_start, duration, venue, address, city, country, photo_url, source_url, source, price")
                 .eq("discord_sent", True)
                 .eq("approved", False)
                 .eq("rejected", False)
@@ -641,7 +641,7 @@ class EventReviewCog(commands.Cog):
             db = create_client(SUPABASE_URL, SUPABASE_KEY)
             res = (
                 db.table("scraped_events")
-                .select("id, title, description, tag, date, time_start, duration, venue, address, city, country, photo_url, source_url, source, price, pay_at_door")
+                .select("id, title, description, tag, date, time_start, duration, venue, address, city, country, photo_url, source_url, source, price")
                 .in_("source", ["instagram", "woeva_picks"])
                 .eq("approved", False)
                 .eq("rejected", False)
@@ -667,7 +667,13 @@ class EventReviewCog(commands.Cog):
                     logger.info(f"Picks: already processed {sid[:8]}, skipping")
                     db.table("scraped_events").update({"discord_sent": True}).eq("id", row["id"]).execute()
                     continue
-                event = _row_to_event(row)
+                try:
+                    event = _row_to_event(row)
+                except Exception as parse_err:
+                    logger.error(f"Picks: _row_to_event FAILED for '{row.get('title')}' id={sid[:8]}: {parse_err} — marking discord_sent to unblock queue")
+                    db.table("scraped_events").update({"discord_sent": True}).eq("id", row["id"]).execute()
+                    await add_pending_event(sid, "parse_error", "0")
+                    continue
                 try:
                     await self._send_event(channel, event)
                     db.table("scraped_events").update({"discord_sent": True}).eq("id", row["id"]).execute()
@@ -684,7 +690,7 @@ class EventReviewCog(commands.Cog):
         try:
             from supabase import create_client
             db = create_client(SUPABASE_URL, SUPABASE_KEY)
-            _select = "id, title, description, tag, date, time_start, duration, venue, address, city, country, photo_url, source_url, source, price, pay_at_door"
+            _select = "id, title, description, tag, date, time_start, duration, venue, address, city, country, photo_url, source_url, source, price"
             # Rebuild query separately to avoid supabase-py mutating shared builder
             new_events = (
                 db.table("scraped_events")
