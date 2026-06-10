@@ -32,6 +32,7 @@ from heylo_scraper import scrape_heylo
 from kudyznudy_scraper import scrape_kudyznudy
 from citybee_scraper import scrape_citybee
 from freshmarket_scraper import scrape_freshmarket
+from nitra_scraper import scrape_nitra
 from enrich import enrich_event
 
 logging.basicConfig(
@@ -128,6 +129,14 @@ def main():
         raw_events.extend(freshmarket_events)
     except Exception as e:
         logger.error(f"FreshMarket scraper failed: {e}", exc_info=True)
+
+    # Nitra.eu kalendar — free events
+    try:
+        nitra_events = scrape_nitra(existing_urls)
+        logger.info(f"Nitra.eu: {len(nitra_events)} new free events")
+        raw_events.extend(nitra_events)
+    except Exception as e:
+        logger.error(f"Nitra scraper failed: {e}", exc_info=True)
 
     saved = 0
     for event in raw_events:
