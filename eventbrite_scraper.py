@@ -22,6 +22,7 @@ LISTING_CONFIGS = [
     {"url": "https://www.eventbrite.com/d/united-kingdom--london/free--music--events/", "city": "London", "country": "GB"},
     {"url": "https://www.eventbrite.com/d/austria--wien/free--music--events/", "city": "Vienna", "country": "AT"},
 ]
+# Always append ?page=N (Eventbrite requires explicit page param)
 MAX_PAGES = 2
 CRAWL_DELAY = 1.2
 
@@ -47,7 +48,7 @@ def scrape_eventbrite(existing_urls: set) -> list[dict]:
         country = config["country"]
 
         for page in range(1, MAX_PAGES + 1):
-            url = listing_url if page == 1 else f"{listing_url}?page={page}"
+            url = f"{listing_url}?page={page}"
             logger.info(f"Eventbrite {city}: fetching page {page}")
             r = _fetch(url)
             if r is None:
