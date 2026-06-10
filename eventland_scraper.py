@@ -20,9 +20,6 @@ logger = logging.getLogger(__name__)
 
 LISTING_URLS = [
     "https://eventland.eu/sk/bratislava-sk/zadarmo/",
-    "https://eventland.eu/sk/kosice-sk/zadarmo/",
-    "https://eventland.eu/en/vienna-at/free-events/",
-    "https://eventland.eu/en/prague-cz/free-events/",
 ]
 BASE_URL = "https://eventland.eu"
 HEADERS = {
