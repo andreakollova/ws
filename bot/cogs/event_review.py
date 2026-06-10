@@ -689,8 +689,12 @@ class EventReviewCog(commands.Cog):
             return
         try:
             from supabase import create_client
+            from datetime import date as _date
             db = create_client(SUPABASE_URL, SUPABASE_KEY)
             _select = "id, title, description, tag, date, time_start, duration, venue, address, city, country, photo_url, source_url, source, price"
+            today = _date.today().isoformat()
+            # First: mark stale past-dated events as sent so they leave the queue
+            db.table("scraped_events").update({"discord_sent": True}).or_("discord_sent.is.null,discord_sent.eq.false").lt("date", today).eq("approved", False).eq("rejected", False).neq("source", "instagram").neq("source", "woeva_picks").execute()
             # Rebuild query separately to avoid supabase-py mutating shared builder
             new_events = (
                 db.table("scraped_events")
@@ -700,6 +704,7 @@ class EventReviewCog(commands.Cog):
                 .eq("rejected", False)
                 .neq("source", "instagram")
                 .neq("source", "woeva_picks")
+                .or_(f"date.is.null,date.gte.{today}")
                 .order("scraped_at", desc=False)
                 .limit(20)
                 .execute()
