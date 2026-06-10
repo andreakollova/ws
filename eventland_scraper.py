@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 
 LISTING_URLS = [
     "https://eventland.eu/sk/bratislava-sk/zadarmo/",
+    "https://eventland.eu/sk/kosice-sk/zadarmo/",
+    "https://eventland.eu/en/vienna-at/free-events/",
+    "https://eventland.eu/en/prague-cz/free-events/",
 ]
 BASE_URL = "https://eventland.eu"
 HEADERS = {
@@ -29,6 +32,7 @@ HEADERS = {
 }
 MAX_EVENTS = 60
 MAX_CHECKS_PER_LISTING = 25   # stop after checking this many unknown URLs per listing page
+MAX_PAGES = 4                 # max pagination pages per listing URL
 CRAWL_DELAY = 0.8
 
 # Eventland event URL: /{locale?}/{city}/event/{id}/{slug}/
@@ -85,48 +89,63 @@ def scrape_eventland(existing_urls: set) -> list[dict]:
     seen_urls: set[str] = set()
 
     for listing_url in LISTING_URLS:
-        logger.info(f"Fetching Eventland listing: {listing_url}")
-        r = _fetch(listing_url)
-        if r is None:
-            logger.error(f"Failed to fetch: {listing_url}")
-            continue
-        soup = BeautifulSoup(r.text, "html.parser")
-        found = _extract_event_urls(soup)
-        logger.info(f"  Found {len(found)} event links")
-
-        checks = 0
-        for url, listing_image in found:
-            if url in seen_urls:
-                continue
-            seen_urls.add(url)
-
-            if url in existing_urls:
-                logger.debug(f"Skip (known): {url}")
-                continue
-
-            if checks >= MAX_CHECKS_PER_LISTING:
-                logger.info(f"Eventland: reached MAX_CHECKS_PER_LISTING for {listing_url}")
+        for page in range(1, MAX_PAGES + 1):
+            page_url = listing_url if page == 1 else f"{listing_url}?page={page}"
+            logger.info(f"Fetching Eventland listing: {page_url}")
+            r = _fetch(page_url)
+            if r is None:
+                logger.error(f"Failed to fetch: {page_url}")
                 break
-            checks += 1
+            soup = BeautifulSoup(r.text, "html.parser")
+            found = _extract_event_urls(soup)
+            logger.info(f"  Found {len(found)} event links on page {page}")
 
-            time.sleep(CRAWL_DELAY)
-            event = _scrape_event_detail(url, listing_image=listing_image)
-            if not event:
-                continue
+            if not found:
+                break  # no more pages
 
-            if not _is_free(event):
-                logger.debug(f"Not free (price={event.get('price_raw')}): {event['title'][:40]}")
-                continue
+            checks = 0
+            all_known = True
+            for url, listing_image in found:
+                if url in seen_urls:
+                    continue
+                seen_urls.add(url)
 
-            # For recurring events use end date for the past-check; never skip if no date
-            check_date = (event.get("recurring_end_date") or event.get("date", "")) if event.get("is_recurring") else event.get("date", "")
-            if check_date and _is_past(check_date):
-                logger.debug(f"Skip past event ({check_date}): {event['title'][:40]}")
-                continue
+                if url in existing_urls:
+                    logger.debug(f"Skip (known): {url}")
+                    continue
 
-            logger.info(f"Free event found: {event['title'][:60]}")
-            events.append(event)
-            existing_urls.add(url)
+                all_known = False
+                if checks >= MAX_CHECKS_PER_LISTING:
+                    logger.info(f"Eventland: reached MAX_CHECKS_PER_LISTING for {page_url}")
+                    break
+                checks += 1
+
+                time.sleep(CRAWL_DELAY)
+                event = _scrape_event_detail(url, listing_image=listing_image)
+                if not event:
+                    continue
+
+                if not _is_free(event):
+                    logger.debug(f"Not free (price={event.get('price_raw')}): {event['title'][:40]}")
+                    continue
+
+                # For recurring events use end date for the past-check; never skip if no date
+                check_date = (event.get("recurring_end_date") or event.get("date", "")) if event.get("is_recurring") else event.get("date", "")
+                if check_date and _is_past(check_date):
+                    logger.debug(f"Skip past event ({check_date}): {event['title'][:40]}")
+                    continue
+
+                logger.info(f"Free event found: {event['title'][:60]}")
+                events.append(event)
+                existing_urls.add(url)
+
+            # If all events on this page were already known, no point going deeper
+            if all_known:
+                logger.info(f"  All events on page {page} already known, stopping pagination")
+                break
+
+            if len(events) >= MAX_EVENTS:
+                break
 
         if len(events) >= MAX_EVENTS:
             break
