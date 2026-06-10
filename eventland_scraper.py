@@ -220,40 +220,47 @@ def _scrape_event_detail(url: str, listing_image: str = "") -> dict | None:
     is_recurring = False
     recurring_end_date = ""
 
+    # Always prefer the HTML item-listing--data date (JSON-LD startDate is sometimes wrong on Eventland)
+    if data_ul and items:
+        date_item = items[0]
+        if RECURRING_RE.search(date_item):
+            is_recurring = True
+            # For recurring, fall back to JSON-LD for the start date
+            if jsonld and jsonld.get("startDate"):
+                start_date = _parse_iso_date(jsonld["startDate"])
+                time_start = _parse_iso_time(jsonld["startDate"])
+        elif " - " in date_item:
+            # "06.06.2026 - 07.06.2026" or "27.05.2026 - 23.09.2026" range
+            sd, ed = _parse_date_range(date_item)
+            if sd:
+                start_date = sd  # HTML date overrides JSON-LD
+            if ed and ed != sd:
+                recurring_end_date = ed
+                try:
+                    if sd and (_date.fromisoformat(ed) - _date.fromisoformat(sd)).days > 14:
+                        is_recurring = True
+                except Exception:
+                    pass
+        else:
+            parsed = _parse_sk_date(date_item)
+            if parsed:
+                start_date = parsed  # HTML date overrides JSON-LD
+
+    # JSON-LD: only use for time and recurring detection if HTML didn't provide date
     if jsonld and jsonld.get("startDate"):
-        start_date = _parse_iso_date(jsonld["startDate"])
+        if not start_date:
+            start_date = _parse_iso_date(jsonld["startDate"])
         time_start = _parse_iso_time(jsonld["startDate"])
 
-    # endDate in JSON-LD means the event repeats or spans a range
     if jsonld and jsonld.get("endDate"):
         end_iso = _parse_iso_date(jsonld["endDate"])
-        if end_iso and end_iso != start_date:
+        if end_iso and end_iso != start_date and not recurring_end_date:
             recurring_end_date = end_iso
             try:
                 if start_date and (_date.fromisoformat(end_iso) - _date.fromisoformat(start_date)).days > 14:
                     is_recurring = True
             except Exception:
                 pass
-
-    if data_ul and items:
-        date_item = items[0]
-        if RECURRING_RE.search(date_item):
-            is_recurring = True
-        elif " - " in date_item:
-            # "27.05.2026 - 23.09.2026" style range
-            sd, ed = _parse_date_range(date_item)
-            if not start_date and sd:
-                start_date = sd
-            if ed and not recurring_end_date:
-                recurring_end_date = ed
-            if sd and ed:
-                try:
-                    if (_date.fromisoformat(ed) - _date.fromisoformat(sd)).days > 14:
-                        is_recurring = True
-                except Exception:
-                    pass
-        elif not start_date:
-            start_date = _parse_sk_date(date_item)
 
     # --- Description (full text from div.item-listing--description) ---
     description = ""
