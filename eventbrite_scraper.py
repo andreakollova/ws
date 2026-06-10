@@ -111,6 +111,7 @@ def _extract_from_listing(soup: BeautifulSoup, city: str, country: str,
                            existing_urls: set, seen: set) -> list[dict]:
     """Extract events from listing page JSON-LD ItemList (no detail page fetches needed)."""
     events: list[dict] = []
+    itemlist_found = False
 
     # Build URL→image map from HTML cards (more reliable than JSON-LD for images)
     card_images = _extract_card_images(soup)
@@ -135,6 +136,7 @@ def _extract_from_listing(soup: BeautifulSoup, city: str, country: str,
                     continue
 
                 if obj.get("@type") == "ItemList":
+                    itemlist_found = True
                     list_items = obj.get("itemListElement", [])
                     logger.info(f"  Found ItemList with {len(list_items)} items")
                     for list_item in list_items:
@@ -154,8 +156,8 @@ def _extract_from_listing(soup: BeautifulSoup, city: str, country: str,
         except Exception as e:
             logger.debug(f"JSON-LD parse error: {e}")
 
-    # Fallback: if no ItemList found, try extracting URLs from page and do targeted detail fetches
-    if not events:
+    # Fallback: only if no ItemList found at all in the page
+    if not itemlist_found:
         logger.info("  No ItemList found — falling back to URL extraction")
         urls = _extract_event_urls(soup)
         for event_url in urls:
@@ -170,6 +172,8 @@ def _extract_from_listing(soup: BeautifulSoup, city: str, country: str,
                 continue
             events.append(event)
             existing_urls.add(event_url)
+    elif not events:
+        logger.info(f"  ItemList found but all {len(card_images)} events already in DB or past")
 
     return events
 
