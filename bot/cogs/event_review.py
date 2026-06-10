@@ -724,10 +724,13 @@ class EventReviewCog(commands.Cog):
                     # Already sent — just mark claimed so it leaves the queue
                     db.table("scraped_events").update({"discord_sent": True}).eq("id", row["id"]).execute()
                     continue
-                event = _row_to_event(row)
-                await self._send_event(channel, event)
-                # Mark claimed AFTER successful send
-                db.table("scraped_events").update({"discord_sent": True}).eq("id", row["id"]).execute()
+                try:
+                    event = _row_to_event(row)
+                    await self._send_event(channel, event)
+                    db.table("scraped_events").update({"discord_sent": True}).eq("id", row["id"]).execute()
+                except Exception as row_err:
+                    logger.error(f"Failed to send event '{row.get('title')}' ({sid[:8]}): {row_err} — skipping")
+                    db.table("scraped_events").update({"discord_sent": True}).eq("id", row["id"]).execute()
                 await asyncio.sleep(0.5)
 
             logger.info(f"Sent {len(new_events)} events to Discord")
@@ -799,7 +802,7 @@ class EventReviewCog(commands.Cog):
         emb.add_field(name="Zdroj", value=(event.get("source") or "").upper(), inline=True)
         emb.add_field(name="Krajina", value=f"{flag} {country}", inline=True)
 
-        if event.get("photo_url"):
+        if event.get("photo_url") and str(event["photo_url"]).startswith("http"):
             emb.set_image(url=event["photo_url"])
         emb.set_footer(text=f"ID: {event['supabase_id']}")
 
