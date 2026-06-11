@@ -483,9 +483,10 @@ class EditEventModal(discord.ui.Modal, title="Upraviť event"):
             emb.title = e['title'][:256]
             emb.description = "\n".join(desc_lines)
             emb.set_footer(text=f"✏️ Upravené — {interaction.user.display_name}")
-            await interaction.message.edit(embed=emb)
 
         await interaction.response.send_message("✏️ Event upravený.", ephemeral=True)
+        if interaction.message and interaction.message.embeds:
+            await interaction.message.edit(embed=emb)
 
 
 # ── Per-event confirmation view ─────────────────────────────────────────────
