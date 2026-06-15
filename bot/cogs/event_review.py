@@ -319,12 +319,12 @@ async def _publish_event(event: dict, post_ig: bool) -> str:
             # Push notifications
             if tokens:
                 import httpx as _httpx
-                async def _send_club_push():
+                async def _send_club_push(_tokens=tokens, _event_id=event_id, _title=event_title):
                     async with _httpx.AsyncClient(timeout=15) as hc:
                         await hc.post(
                             f"{SUPABASE_URL}/functions/v1/send-push",
                             headers={"Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "application/json"},
-                            json={"tokens": tokens, "title": "📍 Woeva Picks", "body": event_title, "data": {"event_id": event_id, "type": "club_event"}},
+                            json={"tokens": _tokens, "title": "📍 Woeva Picks", "body": _title, "data": {"event_id": _event_id, "type": "club_event"}},
                         )
                 asyncio.ensure_future(_send_club_push())
         except Exception as e:
