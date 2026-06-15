@@ -304,29 +304,38 @@ async def _publish_event(event: dict, post_ig: bool) -> str:
         try:
             event_id = result.data[0]["id"]
             event_title = event.get("title", "")
-            members = db.table("club_members").select("user_id, profile:profiles(push_token, notifications_enabled)") \
-                .eq("club_id", woeva_picks_club_id).eq("status", "approved").execute().data or []
 
-            member_ids = [m["user_id"] for m in members]
-            tokens = [m["profile"]["push_token"] for m in members
-                      if m.get("profile") and m["profile"].get("push_token") and m["profile"].get("notifications_enabled")]
+            # Step 1: get approved member user_ids
+            members_resp = db.table("club_members").select("user_id") \
+                .eq("club_id", woeva_picks_club_id).eq("status", "approved").execute()
+            member_ids = [m["user_id"] for m in (members_resp.data or [])]
+            logger.info(f"Woeva Picks members: {len(member_ids)}")
 
-            # In-app notifications
             if member_ids:
+                # In-app notifications for all members
                 notifs = [{"user_id": uid, "type": "club_event", "title": "Woeva Picks", "body": event_title, "data": {"event_id": event_id}} for uid in member_ids]
                 db.table("notifications").insert(notifs).execute()
 
-            # Push notifications
-            if tokens:
-                import httpx as _httpx
-                async def _send_club_push(_tokens=tokens, _event_id=event_id, _title=event_title):
-                    async with _httpx.AsyncClient(timeout=15) as hc:
-                        await hc.post(
-                            f"{SUPABASE_URL}/functions/v1/send-push",
-                            headers={"Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "application/json"},
-                            json={"tokens": _tokens, "title": "📍 Woeva Picks", "body": _title, "data": {"event_id": _event_id, "type": "club_event"}},
-                        )
-                asyncio.ensure_future(_send_club_push())
+                # Step 2: get push tokens — treat NULL notifications_enabled as enabled
+                profiles_resp = db.table("profiles").select("push_token") \
+                    .in_("id", member_ids) \
+                    .neq("notifications_enabled", False) \
+                    .not_("push_token", "is", None) \
+                    .execute()
+                club_tokens = [p["push_token"] for p in (profiles_resp.data or []) if p.get("push_token") and p["push_token"].startswith("ExponentPushToken[")]
+                logger.info(f"Woeva Picks push tokens: {len(club_tokens)}")
+
+                if club_tokens:
+                    import httpx as _httpx
+                    async def _send_club_push(_tokens=club_tokens, _event_id=event_id, _title=event_title):
+                        async with _httpx.AsyncClient(timeout=15) as hc:
+                            resp = await hc.post(
+                                f"{SUPABASE_URL}/functions/v1/send-push",
+                                headers={"Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "application/json"},
+                                json={"tokens": _tokens, "title": "📍 Woeva Picks", "body": _title, "data": {"event_id": _event_id, "type": "club_event"}},
+                            )
+                            logger.info(f"send-push response: {resp.status_code} {resp.text[:200]}")
+                    asyncio.ensure_future(_send_club_push())
         except Exception as e:
             logger.warning(f"Club member notifications failed: {e}")
 
