@@ -243,9 +243,9 @@ async def _publish_event(event: dict, post_ig: bool) -> str:
     pay_at_door = bool(event.get("pay_at_door", False))
     is_free = price == 0 and not pay_at_door
 
-    # Fetch Woeva Picks club ID
-    woeva_picks_club = db.table("clubs").select("id").eq("creator_id", BOT_USER_ID).eq("name", "Woeva Picks").maybe_single().execute()
-    woeva_picks_club_id = woeva_picks_club.data["id"] if woeva_picks_club.data else None
+    # Fetch Woeva Picks club ID (search by name only — creator_id may vary after club merge)
+    _wpc_res = db.table("clubs").select("id").ilike("name", "%woeva picks%").order("created_at", desc=False).limit(1).execute()
+    woeva_picks_club_id = (_wpc_res.data[0]["id"] if _wpc_res and _wpc_res.data else None)
 
     event_row = {
         "creator_id": BOT_USER_ID,
