@@ -194,18 +194,18 @@ async def _add_fake_attendees_staggered(event_id: str, user_ids: list[str]):
 
 
 async def _geocode(address: str) -> tuple:
-    """Geocode address using Nominatim. Returns (lat, lng) or (None, None)."""
+    """Geocode address using Google Geocoding API. Returns (lat, lng) or (None, None)."""
     if not address:
         return None, None
     try:
         import httpx as _httpx
-        params = {"q": address, "format": "json", "limit": 1}
-        headers = {"User-Agent": "WoevaApp/1.0 (woeva@woeva.app)"}
+        params = {"address": address, "key": "AIzaSyDhtj5z-Us7Ic01tHuaJxC_mLTZPG3moj0", "language": "sk"}
         async with _httpx.AsyncClient(timeout=8) as hc:
-            r = await hc.get("https://nominatim.openstreetmap.org/search", params=params, headers=headers)
+            r = await hc.get("https://maps.googleapis.com/maps/api/geocode/json", params=params)
             data = r.json()
-            if data:
-                return float(data[0]["lat"]), float(data[0]["lon"])
+            if data.get("results"):
+                loc = data["results"][0]["geometry"]["location"]
+                return loc["lat"], loc["lng"]
     except Exception as e:
         logger.warning(f"Geocode failed for '{address}': {e}")
     return None, None
@@ -243,8 +243,13 @@ async def _publish_event(event: dict, post_ig: bool) -> str:
     pay_at_door = bool(event.get("pay_at_door", False))
     is_free = price == 0 and not pay_at_door
 
+    # Fetch Woeva Picks club ID
+    woeva_picks_club = db.table("clubs").select("id").eq("creator_id", BOT_USER_ID).eq("name", "Woeva Picks").maybe_single().execute()
+    woeva_picks_club_id = woeva_picks_club.data["id"] if woeva_picks_club.data else None
+
     event_row = {
         "creator_id": BOT_USER_ID,
+        "club_id": woeva_picks_club_id,
         "title": event.get("title", ""),
         "tagline": event.get("description", ""),
         "category": OLD_TAG_TO_CATEGORY.get(event.get("tag", ""), event.get("tag", "Community & Belonging")),
@@ -293,6 +298,37 @@ async def _publish_event(event: dict, post_ig: bool) -> str:
                 asyncio.ensure_future(_add_fake_attendees_staggered(event_id, chosen))
     except Exception as e:
         logger.warning(f"Fake attendees failed: {e}")
+
+    # Send push + in-app notifications to Woeva Picks club members
+    if result.data and woeva_picks_club_id:
+        try:
+            event_id = result.data[0]["id"]
+            event_title = event.get("title", "")
+            members = db.table("club_members").select("user_id, profile:profiles(push_token, notifications_enabled)") \
+                .eq("club_id", woeva_picks_club_id).eq("status", "approved").execute().data or []
+
+            member_ids = [m["user_id"] for m in members]
+            tokens = [m["profile"]["push_token"] for m in members
+                      if m.get("profile") and m["profile"].get("push_token") and m["profile"].get("notifications_enabled")]
+
+            # In-app notifications
+            if member_ids:
+                notifs = [{"user_id": uid, "type": "club_event", "title": "Woeva Picks", "body": event_title, "data": {"event_id": event_id}} for uid in member_ids]
+                db.table("notifications").insert(notifs).execute()
+
+            # Push notifications
+            if tokens:
+                import httpx as _httpx
+                async def _send_club_push():
+                    async with _httpx.AsyncClient(timeout=15) as hc:
+                        await hc.post(
+                            f"{SUPABASE_URL}/functions/v1/send-push",
+                            headers={"Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "application/json"},
+                            json={"tokens": tokens, "title": "📍 Woeva Picks", "body": event_title, "data": {"event_id": event_id, "type": "club_event"}},
+                        )
+                asyncio.ensure_future(_send_club_push())
+        except Exception as e:
+            logger.warning(f"Club member notifications failed: {e}")
 
     # Mark as approved in scraped_events
     db.table("scraped_events").update({"approved": True}).eq("id", event["supabase_id"]).execute()
