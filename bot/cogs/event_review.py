@@ -299,44 +299,6 @@ async def _publish_event(event: dict, post_ig: bool) -> str:
     except Exception as e:
         logger.warning(f"Fake attendees failed: {e}")
 
-    # Send push + in-app notifications to Woeva Picks club members
-    if result.data and woeva_picks_club_id:
-        try:
-            event_id = result.data[0]["id"]
-            event_title = event.get("title", "")
-
-            members_resp = db.table("club_members").select("user_id") \
-                .eq("club_id", woeva_picks_club_id).eq("status", "approved").execute()
-            member_ids = [m["user_id"] for m in (members_resp.data or [])]
-            logger.info(f"Woeva Picks members: {len(member_ids)}")
-
-            if member_ids:
-                notifs = [{"user_id": uid, "type": "club_event", "title": "Woeva Picks", "body": event_title, "data": {"event_id": event_id}} for uid in member_ids]
-                db.table("notifications").insert(notifs).execute()
-
-                profiles_resp = db.table("profiles").select("push_token") \
-                    .in_("id", member_ids) \
-                    .neq("notifications_enabled", False) \
-                    .not_("push_token", "is", None) \
-                    .execute()
-                club_tokens = [p["push_token"] for p in (profiles_resp.data or []) if p.get("push_token") and p["push_token"].startswith("ExponentPushToken[")]
-                logger.info(f"Woeva Picks push tokens: {len(club_tokens)}")
-
-                if club_tokens:
-                    import httpx as _httpx
-                    async def _send_club_push(_tokens=club_tokens, _event_id=event_id, _title=event_title):
-                        messages = [{"to": t, "sound": "default", "title": "📍 Woeva Picks", "body": _title, "data": {"event_id": _event_id, "type": "club_event"}} for t in _tokens]
-                        async with _httpx.AsyncClient(timeout=15) as hc:
-                            resp = await hc.post(
-                                "https://exp.host/--/api/v2/push/send",
-                                headers={"Content-Type": "application/json", "Accept": "application/json"},
-                                json=messages,
-                            )
-                            logger.info(f"Expo push response: {resp.status_code} {resp.text[:300]}")
-                    asyncio.ensure_future(_send_club_push())
-        except Exception as e:
-            logger.warning(f"Club member notifications failed: {e}")
-
     # Mark as approved in scraped_events
     db.table("scraped_events").update({"approved": True}).eq("id", event["supabase_id"]).execute()
 
