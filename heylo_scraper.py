@@ -180,6 +180,9 @@ def _parse_event(raw: dict, group: dict) -> dict | None:
     title = (raw.get("name") or raw.get("title") or raw.get("eventName") or "").strip()
     if not title:
         return None
+    # Strip city prefix like [BRATISLAVA], [KOSICE], etc.
+    import re as _re
+    title = _re.sub(r'^\[[^\]]+\]\s*', '', title).strip()
 
     # Event ID and source URL
     event_id = raw.get("id") or raw.get("eventId") or ""

@@ -243,8 +243,18 @@ async def _publish_event(event: dict, post_ig: bool) -> str:
     pay_at_door = bool(event.get("pay_at_door", False))
     is_free = price == 0 and not pay_at_door
 
-    # Fetch Woeva Picks club ID (search by name only — creator_id may vary after club merge)
-    _wpc_res = db.table("clubs").select("id").ilike("name", "%woeva picks%").order("created_at", desc=False).limit(1).execute()
+    # Map city to the correct city-specific Woeva Picks club
+    _city = (event.get("city") or "").strip()
+    _country = _resolve_country(event)
+    CITY_CLUB_SUFFIX = {
+        "Bratislava": "BA", "Košice": "KE", "Kosice": "KE", "Nitra": "NR",
+        "London": "LON", "Vienna": "VIE", "Wien": "VIE", "Prague": "CZ", "Praha": "CZ",
+    }
+    _suffix = CITY_CLUB_SUFFIX.get(_city)
+    if _suffix:
+        _wpc_res = db.table("clubs").select("id").ilike("name", f"Woeva Picks {_suffix}").limit(1).execute()
+    else:
+        _wpc_res = db.table("clubs").select("id").ilike("name", "%woeva picks%").order("created_at", desc=False).limit(1).execute()
     woeva_picks_club_id = (_wpc_res.data[0]["id"] if _wpc_res and _wpc_res.data else None)
 
     event_row = {
@@ -533,10 +543,10 @@ class EventReviewCog(commands.Cog):
             from supabase import create_client
             from datetime import date, timedelta
             db = create_client(SUPABASE_URL, SUPABASE_KEY)
-            # Auto-reject stale unreviewed events older than 14 days to keep queue clean
-            cutoff = (date.today() - timedelta(days=14)).isoformat()
+            # Auto-reject stale unreviewed events older than 3 days to keep queue clean
+            cutoff = (date.today() - timedelta(days=3)).isoformat()
             db.table("scraped_events").update({"rejected": True}).eq("discord_sent", True).eq("approved", False).eq("rejected", False).lt("scraped_at", cutoff).execute()
-            # Only restore views for events scraped in the last 14 days (max 20)
+            # Only restore views for events scraped in the last 3 days (max 20)
             result = (
                 db.table("scraped_events")
                 .select("id, title, description, tag, date, time_start, duration, venue, address, city, country, photo_url, source_url, source, price")
