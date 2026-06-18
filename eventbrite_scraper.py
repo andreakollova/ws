@@ -19,11 +19,11 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://www.eventbrite.com"
 LISTING_CONFIGS = [
-    {"url": "https://www.eventbrite.com/d/united-kingdom--london/free--music--events/", "city": "London", "country": "GB", "max_events": 3},
-    {"url": "https://www.eventbrite.com/d/austria--wien/free--music--events/", "city": "Vienna", "country": "AT", "max_events": 5},
+    {"url": "https://www.eventbrite.com/d/united-kingdom--london/free--music--events/", "city": "London", "country": "GB", "max_events": 10},
+    {"url": "https://www.eventbrite.com/d/austria--wien/free--music--events/", "city": "Vienna", "country": "AT", "max_events": 8},
 ]
 # Always append ?page=N (Eventbrite requires explicit page param)
-MAX_PAGES = 1
+MAX_PAGES = 2
 CRAWL_DELAY = 1.2
 
 HEADERS = {
