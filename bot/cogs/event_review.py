@@ -517,6 +517,9 @@ class EventReviewCog(commands.Cog):
         self._picks_lock = asyncio.Lock()
         self._last_event_sent: datetime = datetime.now(timezone.utc)
         self._last_no_events_notice: Optional[datetime] = None
+        # Single shared Supabase client — avoids creating new HTTP connections every poll
+        from supabase import create_client
+        self._db = create_client(SUPABASE_URL, SUPABASE_KEY)
         self.poll_events.start()
         self.poll_picks.start()
 
@@ -525,18 +528,24 @@ class EventReviewCog(commands.Cog):
         self.poll_picks.cancel()
 
     async def cog_load(self):
-        """On startup: re-register persistent views for all pending events."""
+        """On startup: re-register persistent views for recent pending events only."""
         try:
             from supabase import create_client
+            from datetime import date, timedelta
             db = create_client(SUPABASE_URL, SUPABASE_KEY)
+            # Auto-reject stale unreviewed events older than 14 days to keep queue clean
+            cutoff = (date.today() - timedelta(days=14)).isoformat()
+            db.table("scraped_events").update({"rejected": True}).eq("discord_sent", True).eq("approved", False).eq("rejected", False).lt("scraped_at", cutoff).execute()
+            # Only restore views for events scraped in the last 14 days (max 20)
             result = (
                 db.table("scraped_events")
                 .select("id, title, description, tag, date, time_start, duration, venue, address, city, country, photo_url, source_url, source, price")
                 .eq("discord_sent", True)
                 .eq("approved", False)
                 .eq("rejected", False)
+                .gte("scraped_at", cutoff)
                 .order("scraped_at", desc=True)
-                .limit(200)
+                .limit(20)
                 .execute()
             )
             restored = 0
@@ -575,8 +584,7 @@ class EventReviewCog(commands.Cog):
         if not SUPABASE_URL or not SUPABASE_KEY:
             return
         try:
-            from supabase import create_client
-            db = create_client(SUPABASE_URL, SUPABASE_KEY)
+            db = self._db
             res = (
                 db.table("scraped_events")
                 .select("id, title, description, tag, date, time_start, duration, venue, address, city, country, photo_url, source_url, source, price")
@@ -626,9 +634,8 @@ class EventReviewCog(commands.Cog):
         if not SUPABASE_URL or not SUPABASE_KEY:
             return
         try:
-            from supabase import create_client
             from datetime import date as _date
-            db = create_client(SUPABASE_URL, SUPABASE_KEY)
+            db = self._db
             _select = "id, title, description, tag, date, time_start, duration, venue, address, city, country, photo_url, source_url, source, price"
             today = _date.today().isoformat()
             # First: mark stale past-dated events as sent so they leave the queue
