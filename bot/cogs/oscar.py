@@ -17,6 +17,35 @@ IG_USER_ID = os.environ.get('INSTAGRAM_ACCOUNT_ID', '')
 IG_ACCESS_TOKEN = os.environ.get('INSTAGRAM_ACCESS_TOKEN', '')
 
 
+async def _delete_storage_file(session: aiohttp.ClientSession, url: str | None):
+    """Delete a file from Supabase Storage given its public URL."""
+    if not url or not SUPABASE_URL:
+        return
+    # URL format: https://<project>.supabase.co/storage/v1/object/public/<bucket>/<path>
+    marker = '/storage/v1/object/public/'
+    idx = url.find(marker)
+    if idx == -1:
+        return
+    after = url[idx + len(marker):]
+    parts = after.split('/', 1)
+    if len(parts) != 2:
+        return
+    bucket, file_path = parts[0], parts[1].split('?')[0]
+    try:
+        async with session.delete(
+            f'{SUPABASE_URL}/storage/v1/object/{bucket}',
+            headers={
+                'apikey': SUPABASE_KEY,
+                'Authorization': f'Bearer {SUPABASE_KEY}',
+                'Content-Type': 'application/json',
+            },
+            data=json.dumps({'prefixes': [file_path]}),
+        ) as res:
+            logger.info(f'Storage delete {bucket}/{file_path}: {res.status}')
+    except Exception as e:
+        logger.warning(f'Storage delete failed for {url}: {e}')
+
+
 class Oscar(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -155,6 +184,10 @@ class Oscar(commands.Cog):
             ):
                 pass
 
+            # Clean up storage files after posting
+            for url in [item.get('photo_url'), item.get('generated_url')]:
+                await _delete_storage_file(session, url)
+
             await interaction.followup.send('Postnuté na Instagram!', ephemeral=True)
 
     async def _handle_regen_caption(self, interaction: discord.Interaction, item_id: str):
@@ -242,6 +275,10 @@ class Oscar(commands.Cog):
                 data=json.dumps({'status': 'posted'}),
             ):
                 pass
+
+            # Clean up storage files after posting
+            for url in [item.get('photo_url'), item.get('generated_url')]:
+                await _delete_storage_file(session, url)
 
             await interaction.followup.send('Reel postnuty na Instagram!', ephemeral=True)
 
