@@ -19,12 +19,11 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://www.eventbrite.com"
 LISTING_CONFIGS = [
-    # London paused — re-enable when ready
-    # {"url": "https://www.eventbrite.com/d/united-kingdom--london/free--music--events/", "city": "London", "country": "GB"},
-    {"url": "https://www.eventbrite.com/d/austria--wien/free--music--events/", "city": "Vienna", "country": "AT"},
+    {"url": "https://www.eventbrite.com/d/united-kingdom--london/free--music--events/", "city": "London", "country": "GB", "max_events": 3},
+    {"url": "https://www.eventbrite.com/d/austria--wien/free--music--events/", "city": "Vienna", "country": "AT", "max_events": 5},
 ]
 # Always append ?page=N (Eventbrite requires explicit page param)
-MAX_PAGES = 2
+MAX_PAGES = 1
 CRAWL_DELAY = 1.2
 
 HEADERS = {
@@ -47,6 +46,8 @@ def scrape_eventbrite(existing_urls: set) -> list[dict]:
         listing_url = config["url"]
         city = config["city"]
         country = config["country"]
+        max_events = config.get("max_events")
+        city_events: list[dict] = []
 
         for page in range(1, MAX_PAGES + 1):
             url = f"{listing_url}?page={page}"
@@ -62,11 +63,17 @@ def scrape_eventbrite(existing_urls: set) -> list[dict]:
             logger.info(f"  Found {len(page_events)} new events from listing page")
 
             if not page_events:
-                # If we got 0 new events on this page, stop paginating
                 break
 
-            events.extend(page_events)
+            city_events.extend(page_events)
+
+            if max_events and len(city_events) >= max_events:
+                city_events = city_events[:max_events]
+                break
+
             time.sleep(CRAWL_DELAY)
+
+        events.extend(city_events)
 
     logger.info(f"Eventbrite total new events: {len(events)}")
     return events
